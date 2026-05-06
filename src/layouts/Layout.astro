@@ -1,5 +1,6 @@
 ---
 import Toaster from "../components/Toaster.astro";
+import Analytics from '@vercel/analytics/astro';
 ---
 
 <!doctype html>
@@ -20,6 +21,7 @@ import Toaster from "../components/Toaster.astro";
       href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
+    <Analytics />
   </head>
   <body>
     <div class="sidebar-overlay" id="global-overlay"></div>
