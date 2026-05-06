@@ -18,6 +18,13 @@ export const GET: APIRoute = async ({ request }) => {
     const { addSyncLog } = await import('../../../lib/logs');
     await addSyncLog({ userId: user.id, type: 'Auth', status: 'Success', details: 'Google Session Established' });
 
+    const state = url.searchParams.get('state');
+    
+    if (state === 'mobile') {
+      // Redirect back to the mobile app with the session ID
+      return Response.redirect(`com.calcallowance.app://auth-callback?session=${sessionId}`, 302);
+    }
+
     const headers = new Headers();
     headers.set('Location', '/dashboard');
     headers.set(
@@ -28,6 +35,10 @@ export const GET: APIRoute = async ({ request }) => {
     return new Response(null, { status: 302, headers });
   } catch (err: any) {
     console.error('OAuth callback error:', err.response?.data || err.message);
-    return Response.redirect(new URL('/?error=auth_failed', url.origin).toString(), 302);
+    const state = url.searchParams.get('state');
+    const redirectUrl = state === 'mobile' 
+      ? 'com.calcallowance.app://auth-callback?error=auth_failed'
+      : new URL('/?error=auth_failed', url.origin).toString();
+    return Response.redirect(redirectUrl, 302);
   }
 };

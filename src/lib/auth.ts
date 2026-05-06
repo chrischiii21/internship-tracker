@@ -22,12 +22,13 @@ export function getOAuth2Client(origin?: string) {
   );
 }
 
-export function getAuthUrl(origin?: string) {
+export function getAuthUrl(origin?: string, isMobile?: boolean) {
   const client = getOAuth2Client(origin);
   return client.generateAuthUrl({
     access_type: 'offline',
     scope: SCOPES,
     prompt: 'consent',
+    state: isMobile ? 'mobile' : 'web'
   });
 }
 
