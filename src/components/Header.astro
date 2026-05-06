@@ -4,8 +4,26 @@ const { user } = Astro.props;
 
 <header id="sys-header">
   <div class="header-left">
-    <button id="mobile-menu-toggle" class="menu-toggle" aria-label="Toggle Menu">
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    <button
+      id="mobile-menu-toggle"
+      class="menu-toggle"
+      aria-label="Toggle Menu"
+    >
+      <svg
+        width="24"
+        height="24"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        ><line x1="3" y1="12" x2="21" y2="12"></line><line
+          x1="3"
+          y1="6"
+          x2="21"
+          y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg
+      >
     </button>
     <div class="logo-mark">
       <img src="/logo.png" alt="Logo" width="32" height="32" />
@@ -13,7 +31,7 @@ const { user } = Astro.props;
     <div class="logo-text">
       <span class="logo-primary">INTERNSHIP</span>
       <span class="logo-sep">/</span>
-      <span class="logo-secondary">Tracker</span>
+      <span class="logo-secondary">Student Tracker</span>
     </div>
   </div>
   <div class="header-center">
@@ -25,10 +43,45 @@ const { user } = Astro.props;
   </div>
   <div class="header-right">
     <div class="user-info">
-      {user?.picture && <img class="avatar" src={user.picture} alt={user.name} width="28" height="28" />}
-      <span class="user-name">{user?.name?.split(' ')[0]}</span>
-      <button type="button" id="logout-trigger" class="logout-btn" title="Sign out">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><polyline points="16,17 21,12 16,7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><line x1="21" y1="12" x2="9" y2="12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      {
+        user?.picture && (
+          <img
+            class="avatar"
+            src={user.picture}
+            alt={user.name}
+            width="28"
+            height="28"
+          />
+        )
+      }
+      <span class="user-name">{user?.name?.split(" ")[0]}</span>
+      <button
+        type="button"
+        id="logout-trigger"
+        class="logout-btn"
+        title="Sign out"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+          ><path
+            d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"></path><polyline
+            points="16,17 21,12 16,7"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"></polyline><line
+            x1="21"
+            y1="12"
+            x2="9"
+            y2="12"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"></line></svg
+        >
       </button>
     </div>
   </div>
@@ -39,13 +92,31 @@ const { user } = Astro.props;
   <div class="modal-content">
     <div class="modal-header">
       <div class="logout-icon">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16,17 21,12 16,7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        <svg
+          width="24"
+          height="24"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.5"
+          ><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline
+            points="16,17 21,12 16,7"></polyline><line
+            x1="21"
+            y1="12"
+            x2="9"
+            y2="12"></line></svg
+        >
       </div>
       <h2>Sign out?</h2>
     </div>
-    <p class="modal-desc">Are you sure you want to end your current session? You'll need to log in again to access your dashboard.</p>
+    <p class="modal-desc">
+      Are you sure you want to end your current session? You'll need to log in
+      again to access your dashboard.
+    </p>
     <div class="modal-actions">
-      <button type="button" id="close-logout-modal" class="btn-cancel">Stay Logged In</button>
+      <button type="button" id="close-logout-modal" class="btn-cancel"
+        >Stay Logged In</button
+      >
       <a href="/api/auth/logout" class="btn-confirm-logout">Yes, Sign Out</a>
     </div>
   </div>
@@ -53,127 +124,321 @@ const { user } = Astro.props;
 
 <style>
   #sys-header {
-    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 0 24px; height: 56px;
-    background: rgba(5, 11, 22, 0.88); backdrop-filter: blur(16px);
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 24px;
+    height: 56px;
+    background: rgba(5, 11, 22, 0.88);
+    backdrop-filter: blur(16px);
     border-bottom: 1px solid var(--border-subtle);
   }
-  .header-left { display: flex; align-items: center; gap: 10px; }
-  .logo-mark { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 8px; overflow: hidden; }
-  .logo-mark img { width: 100%; height: 100%; object-fit: contain; }
-  .logo-text { display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 600; }
-  .logo-primary { color: var(--ntv-orange); font-weight: 800; letter-spacing: .08em; }
-  .logo-sep { color: rgba(255,255,255,.22); font-weight: 300; }
-  .logo-secondary { color: var(--text-secondary); font-weight: 400; }
-  .clock-wrapper { display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,.04); border: 1px solid var(--border-subtle); border-radius: 20px; padding: 5px 14px; }
-  .live-clock { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 500; color: var(--text-primary); letter-spacing: .06em; }
-  .clock-tz { font-size: 10px; font-weight: 600; color: var(--ntv-orange); letter-spacing: .1em; background: rgba(237, 102, 33, 0.15); padding: 2px 6px; border-radius: 4px; }
-  .pulse-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; animation: pdot 2s ease-in-out infinite; }
-  .green { background: #34d399; box-shadow: 0 0 7px #34d399; }
-  @keyframes pdot { 0%,100%{opacity:1} 50%{opacity:.35} }
-
-  .user-info { display: flex; align-items: center; gap: 10px; }
-  .avatar { border-radius: 50%; border: 2px solid var(--ntv-orange); }
-  .user-name { font-size: 13px; font-weight: 600; color: var(--text-primary); }
-  .logout-btn {
-    display: flex; align-items: center; justify-content: center;
-    width: 32px; height: 32px; border-radius: 8px;
-    background: rgba(230, 30, 42, 0.1); border: 1px solid rgba(230, 30, 42, 0.2);
-    color: #f87171; text-decoration: none; transition: all .2s;
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
   }
-  .logout-btn:hover { background: var(--ntv-red); color: white; transform: scale(1.05); }
+  .logo-mark {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .logo-mark img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+  .logo-text {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .logo-primary {
+    color: var(--ntv-orange);
+    font-weight: 800;
+    letter-spacing: 0.08em;
+  }
+  .logo-sep {
+    color: rgba(255, 255, 255, 0.22);
+    font-weight: 300;
+  }
+  .logo-secondary {
+    color: var(--text-secondary);
+    font-weight: 400;
+  }
+  .clock-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border-subtle);
+    border-radius: 20px;
+    padding: 5px 14px;
+  }
+  .live-clock {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-primary);
+    letter-spacing: 0.06em;
+  }
+  .clock-tz {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--ntv-orange);
+    letter-spacing: 0.1em;
+    background: rgba(237, 102, 33, 0.15);
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+  .pulse-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    animation: pdot 2s ease-in-out infinite;
+  }
+  .green {
+    background: #34d399;
+    box-shadow: 0 0 7px #34d399;
+  }
+  @keyframes pdot {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.35;
+    }
+  }
+
+  .user-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .avatar {
+    border-radius: 50%;
+    border: 2px solid var(--ntv-orange);
+  }
+  .user-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+  .logout-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: rgba(230, 30, 42, 0.1);
+    border: 1px solid rgba(230, 30, 42, 0.2);
+    color: #f87171;
+    text-decoration: none;
+    transition: all 0.2s;
+  }
+  .logout-btn:hover {
+    background: var(--ntv-red);
+    color: white;
+    transform: scale(1.05);
+  }
 
   @media print {
-    #sys-header { display: none !important; }
+    #sys-header {
+      display: none !important;
+    }
   }
 
-  .menu-toggle { display: none; background: none; border: none; color: var(--text-primary); cursor: pointer; padding: 4px; border-radius: 6px; }
-  .menu-toggle:hover { background: rgba(255,255,255,0.05); }
+  .menu-toggle {
+    display: none;
+    background: none;
+    border: none;
+    color: var(--text-primary);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 6px;
+  }
+  .menu-toggle:hover {
+    background: rgba(255, 255, 255, 0.05);
+  }
 
   @media (max-width: 900px) {
-    .menu-toggle { display: block; margin-right: 8px; }
-    .logo-secondary, .logo-sep, .user-name { display: none; }
-    #sys-header { padding: 0 16px; }
-    .header-center { display: none; }
+    .menu-toggle {
+      display: block;
+      margin-right: 8px;
+    }
+    .logo-secondary,
+    .logo-sep,
+    .user-name {
+      display: none;
+    }
+    #sys-header {
+      padding: 0 16px;
+    }
+    .header-center {
+      display: none;
+    }
   }
 
   /* LOGOUT MODAL STYLES */
   .modal-overlay {
-    position: fixed; inset: 0; background: rgba(5, 11, 22, 0.85);
-    backdrop-filter: blur(8px); z-index: 2000; display: flex;
-    align-items: center; justify-content: center; padding: 20px;
-    opacity: 0; pointer-events: none; transition: opacity 0.3s;
+    position: fixed;
+    inset: 0;
+    background: rgba(5, 11, 22, 0.85);
+    backdrop-filter: blur(8px);
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s;
   }
-  .modal-overlay.active { opacity: 1; pointer-events: auto; }
-  
+  .modal-overlay.active {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
   .modal-content {
-    background: #0d1421; border: 1px solid var(--border-subtle);
-    border-radius: 20px; width: 100%; max-width: 400px; padding: 32px;
-    box-shadow: 0 24px 80px rgba(0,0,0,0.6);
-    transform: scale(0.95) translateY(10px); transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    background: #0d1421;
+    border: 1px solid var(--border-subtle);
+    border-radius: 20px;
+    width: 100%;
+    max-width: 400px;
+    padding: 32px;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+    transform: scale(0.95) translateY(10px);
+    transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
   }
-  .modal-overlay.active .modal-content { transform: scale(1) translateY(0); }
-  
-  .modal-header { text-align: center; margin-bottom: 20px; }
-  .logout-icon { 
-    display: inline-flex; align-items: center; justify-content: center;
-    width: 56px; height: 56px; background: rgba(237, 102, 33, 0.1);
-    color: var(--ntv-orange); border-radius: 50%; margin-bottom: 16px;
+  .modal-overlay.active .modal-content {
+    transform: scale(1) translateY(0);
+  }
+
+  .modal-header {
+    text-align: center;
+    margin-bottom: 20px;
+  }
+  .logout-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 56px;
+    height: 56px;
+    background: rgba(237, 102, 33, 0.1);
+    color: var(--ntv-orange);
+    border-radius: 50%;
+    margin-bottom: 16px;
     border: 1px solid rgba(237, 102, 33, 0.2);
   }
-  .modal-header h2 { font-size: 22px; font-weight: 700; color: #fff; }
-  .modal-desc { font-size: 14px; color: var(--text-secondary); text-align: center; line-height: 1.6; margin-bottom: 32px; }
-  
-  .modal-actions { display: flex; flex-direction: column; gap: 12px; }
+  .modal-header h2 {
+    font-size: 22px;
+    font-weight: 700;
+    color: #fff;
+  }
+  .modal-desc {
+    font-size: 14px;
+    color: var(--text-secondary);
+    text-align: center;
+    line-height: 1.6;
+    margin-bottom: 32px;
+  }
+
+  .modal-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
   .btn-confirm-logout {
-    display: block; text-align: center; text-decoration: none;
-    width: 100%; padding: 14px; background: var(--ntv-gradient); color: #fff;
-    border: none; border-radius: 12px; font-size: 14px; font-weight: 700;
-    cursor: pointer; transition: all 0.2s;
+    display: block;
+    text-align: center;
+    text-decoration: none;
+    width: 100%;
+    padding: 14px;
+    background: var(--ntv-gradient);
+    color: #fff;
+    border: none;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
   }
-  .btn-confirm-logout:hover { filter: brightness(1.1); transform: translateY(-1px); box-shadow: 0 4px 15px rgba(237, 102, 33, 0.3); }
-  
+  .btn-confirm-logout:hover {
+    filter: brightness(1.1);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 15px rgba(237, 102, 33, 0.3);
+  }
+
   .btn-cancel {
-    width: 100%; padding: 14px; background: rgba(255, 255, 255, 0.05); color: var(--text-primary);
-    border: 1px solid var(--border-subtle); border-radius: 12px; font-size: 14px; font-weight: 600;
-    cursor: pointer; transition: all 0.2s;
+    width: 100%;
+    padding: 14px;
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-primary);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
   }
-  .btn-cancel:hover { background: rgba(255, 255, 255, 0.08); }
+  .btn-cancel:hover {
+    background: rgba(255, 255, 255, 0.08);
+  }
 </style>
 
 <script>
   // Mobile Menu Logic
-  document.getElementById('mobile-menu-toggle')?.addEventListener('click', () => {
-    document.body.classList.toggle('sidebar-open');
-  });
+  document
+    .getElementById("mobile-menu-toggle")
+    ?.addEventListener("click", () => {
+      document.body.classList.toggle("sidebar-open");
+    });
 
   // Logout Modal Logic
-  const logoutModal = document.getElementById('logout-modal');
-  const logoutTrigger = document.getElementById('logout-trigger');
-  const closeLogoutBtn = document.getElementById('close-logout-modal');
+  const logoutModal = document.getElementById("logout-modal");
+  const logoutTrigger = document.getElementById("logout-trigger");
+  const closeLogoutBtn = document.getElementById("close-logout-modal");
 
-  logoutTrigger?.addEventListener('click', (e) => {
+  logoutTrigger?.addEventListener("click", (e) => {
     e.preventDefault();
-    logoutModal?.classList.add('active');
-    document.body.style.overflow = 'hidden';
+    logoutModal?.classList.add("active");
+    document.body.style.overflow = "hidden";
   });
 
   const closeLogoutModal = () => {
-    logoutModal?.classList.remove('active');
-    document.body.style.overflow = '';
+    logoutModal?.classList.remove("active");
+    document.body.style.overflow = "";
   };
 
-  closeLogoutBtn?.addEventListener('click', closeLogoutModal);
-  logoutModal?.addEventListener('click', (e) => {
+  closeLogoutBtn?.addEventListener("click", closeLogoutModal);
+  logoutModal?.addEventListener("click", (e) => {
     if (e.target === logoutModal) closeLogoutModal();
   });
 
   function tick() {
-    const pht = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Manila' }));
-    const h = String(pht.getHours()).padStart(2,'0'), m = String(pht.getMinutes()).padStart(2,'0'), s = String(pht.getSeconds()).padStart(2,'0');
-    const el = document.getElementById('live-clock');
+    const pht = new Date(
+      new Date().toLocaleString("en-US", { timeZone: "Asia/Manila" }),
+    );
+    const h = String(pht.getHours()).padStart(2, "0"),
+      m = String(pht.getMinutes()).padStart(2, "0"),
+      s = String(pht.getSeconds()).padStart(2, "0");
+    const el = document.getElementById("live-clock");
     if (el) el.textContent = `${h}:${m}:${s}`;
   }
-  tick(); setInterval(tick, 1000);
+  tick();
+  setInterval(tick, 1000);
 </script>

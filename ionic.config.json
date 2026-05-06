@@ -1,0 +1,7 @@
+{
+  "name": "calcallowance",
+  "integrations": {
+    "capacitor": {}
+  },
+  "type": "custom"
+}

@@ -1,12 +1,14 @@
 ---
+import { ClientRouter } from "astro:transitions";
 import Toaster from "../components/Toaster.astro";
+import Analytics from "@vercel/analytics/astro";
 ---
 
 <!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <link rel="icon" type="image/png" href="/logo.png" />
     <meta name="generator" content={Astro.generator} />
     <meta
@@ -20,11 +22,25 @@ import Toaster from "../components/Toaster.astro";
       href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
+    <ClientRouter />
+    <script>
+      import { App } from '@capacitor/app';
+      
+      // Handle Android Hardware Back Button
+      App.addListener('backButton', ({ canGoBack }) => {
+        if (canGoBack) {
+          window.history.back();
+        } else {
+          App.exitApp();
+        }
+      });
+    </script>
   </head>
   <body>
     <div class="sidebar-overlay" id="global-overlay"></div>
     <slot />
     <Toaster />
+    <Analytics />
 
     <script is:inline>
       document
@@ -100,7 +116,7 @@ import Toaster from "../components/Toaster.astro";
     .mobile-only {
       display: flex;
     }
-    
+
     /* Ensure all main content areas are centered on mobile */
     [id="portal-main"] {
       padding: 24px 16px !important;
@@ -108,8 +124,11 @@ import Toaster from "../components/Toaster.astro";
       flex-direction: column !important;
       align-items: center !important;
     }
-    
-    [id$="-content"], .content-grid, .tracker-layout, .dtr-scroll-wrapper {
+
+    [id$="-content"],
+    .content-grid,
+    .tracker-layout,
+    .dtr-scroll-wrapper {
       width: 100% !important;
       max-width: 100% !important;
     }
