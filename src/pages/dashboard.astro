@@ -9,6 +9,7 @@ import { getManualEntries } from '../lib/entries';
 import { getClockifyUser, getRenderedHours, getStudentProgress } from '../lib/clockify';
 import { formatHMS, formatHours } from '../lib/utils';
 import { groupEntries } from '../lib/grouping';
+import { getPayoutAdjustments } from '../lib/payouts';
 
 const cookieHeader = Astro.request.headers.get('cookie') || '';
 const cookies = parse(cookieHeader);
@@ -50,11 +51,35 @@ allRawEntries = [
 ];
 
 const grouped = groupEntries(allRawEntries, settings.paySchedule);
-const monthlyData = grouped.map(item => ({
-  label: item.label,
-  rendered: item.totalSeconds / 3600,
-  earnings: (item.totalSeconds / 3600) * settings.hourlyRate
-}));
+const adjustments = await getPayoutAdjustments(user.id);
+
+let runningCarryOver = 0;
+const monthlyDataRaw = grouped.map(item => {
+  const calculatedEarnings = (item.totalSeconds / 3600) * settings.hourlyRate;
+  const totalExpected = calculatedEarnings + runningCarryOver;
+  
+  // If user hasn't set an adjustment, we assume they received the full amount (expected)
+  // unless it's the current period (which we might want to keep as 'pending')
+  const isSet = adjustments[item.label] !== undefined;
+  const actualReceived = isSet ? adjustments[item.label] : totalExpected;
+  const carryOver = totalExpected - actualReceived;
+  
+  const entry = {
+    label: item.label,
+    rendered: item.totalSeconds / 3600,
+    calculated: calculatedEarnings,
+    totalExpected,
+    actualReceived,
+    carryOverIn: runningCarryOver,
+    carryOverOut: carryOver,
+    isAdjusted: isSet
+  };
+  
+  runningCarryOver = carryOver;
+  return entry;
+});
+
+const monthlyData = [...monthlyDataRaw].reverse();
 
 const totalEarnings = renderedHours * settings.hourlyRate;
 const progressPercent = Math.min(100, (renderedHours / (settings.targetHours || 1)) * 100);
@@ -342,24 +367,81 @@ const finishDateStr = estimatedFinishDate.toLocaleDateString('en-US', {
             </div>
             <div class="breakdown-list">
               {monthlyData.map(item => (
-                <div class="breakdown-item">
-                  <div class="item-main">
-                    <span class="item-label">{item.label}</span>
-                    <span class="item-hours">{formatHours(item.rendered)} rendered</span>
-                  </div>
-                  <div class="item-value">
-                    {settings.hasAllowance 
-                      ? `₱ ${item.earnings.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                      : `${formatHours(item.rendered)}`}
-                  </div>
-                </div>
-              ))}
+  <div class="breakdown-item-wrapper">
+    <div class="breakdown-item">
+      <div class="item-main">
+        <span class="item-label">{item.label}</span>
+        <div class="item-meta">
+          <span class="item-hours">{formatHours(item.rendered)} rendered</span>
+          {item.carryOverIn !== 0 && (
+            <span class={`carry-tag ${item.carryOverIn > 0 ? 'plus' : 'minus'}`}>
+              {item.carryOverIn > 0 ? '+' : ''}₱{item.carryOverIn.toLocaleString()} carry-over
+            </span>
+          )}
+        </div>
+      </div>
+      <div class="item-values">
+        {item.isAdjusted ? (
+          <div class="payout-status set">
+            <div class="value-group">
+              <span class="v-label">Received</span>
+              <span class="v-amount accent">₱ {item.actualReceived.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            </div>
+            <button class="btn-edit-payout" data-label={item.label} data-amount={item.actualReceived.toFixed(2)}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4L18.5 2.5z"></path></svg>
+            </button>
+          </div>
+        ) : (
+          <div class="payout-status pending">
+             <div class="value-group">
+              <span class="v-label">Expected</span>
+              <span class="v-amount">₱ {item.totalExpected.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            </div>
+            <div class="status-actions">
+              <form action="/api/payouts" method="POST" class="inline-form">
+                <input type="hidden" name="periodLabel" value={item.label} />
+                <input type="hidden" name="amountReceived" value={item.totalExpected.toFixed(2)} />
+                <button type="submit" class="btn-received">Received</button>
+              </form>
+              <button class="btn-edit-payout secondary" data-label={item.label} data-amount={item.totalExpected.toFixed(2)}>Edit</button>
+            </div>
+          </div>
+        )}
+
+        <form action="/api/payouts" method="POST" class="payout-edit-form" style="display: none;">
+          <input type="hidden" name="periodLabel" value={item.label} />
+          <div class="compact-input-group">
+            <span class="v-currency">₱</span>
+            <input 
+              type="number" 
+              name="amountReceived" 
+              value={item.actualReceived.toFixed(2)} 
+              step="0.01" 
+              class="v-amount-input"
+            />
+            <button type="submit" class="btn-save-inline">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+    {item.carryOverOut !== 0 && (
+      <div class="carry-over-line">
+        <span class="line-text">
+          {item.carryOverOut > 0 ? 'Excess' : 'Shortage'} of ₱{Math.abs(item.carryOverOut).toLocaleString()} added to next period
+        </span>
+      </div>
+    )}
+  </div>
+))}
               {monthlyData.length === 0 && (
                 <div class="empty-breakdown">No logs recorded for the current program period.</div>
               )}
             </div>
           </section>
         </div>
+      </div>
       </div>
     </main>
   </div>
@@ -379,6 +461,23 @@ const finishDateStr = estimatedFinishDate.toLocaleDateString('en-US', {
     const newUrl = window.location.pathname;
     window.history.replaceState({}, '', newUrl);
   }
+
+  // Payout Edit Toggle
+  document.querySelectorAll('.btn-edit-payout').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const wrapper = btn.closest('.item-values');
+      const statusDiv = wrapper.querySelector('.payout-status');
+      const editForm = wrapper.querySelector('.payout-edit-form');
+      
+      if (statusDiv && editForm) {
+        statusDiv.style.display = 'none';
+        editForm.style.display = 'flex';
+        const input = editForm.querySelector('input[type="number"]');
+        input.focus();
+        input.select();
+      }
+    });
+  });
 </script>
 
 <style>
@@ -468,12 +567,64 @@ const finishDateStr = estimatedFinishDate.toLocaleDateString('en-US', {
   .summary-value { font-size: 18px; font-weight: 700; color: #fff; }
 
   .earnings-breakdown { background: var(--card-bg); border: 1px solid var(--border-subtle); border-radius: 24px; padding: 24px; }
-  .breakdown-list { display: flex; flex-direction: column; gap: 12px; margin-top: 16px; }
-  .breakdown-item { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); border-radius: 16px; transition: 0.2s; }
-  .breakdown-item:hover { background: rgba(255,255,255,0.05); transform: translateX(4px); }
-  .item-label { display: block; font-size: 14px; font-weight: 600; color: #fff; margin-bottom: 4px; }
+  .breakdown-list { display: flex; flex-direction: column; gap: 16px; margin-top: 16px; }
+  .breakdown-item-wrapper { display: flex; flex-direction: column; gap: 8px; }
+  .breakdown-item { display: flex; justify-content: space-between; align-items: center; padding: 18px 24px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); border-radius: 18px; transition: 0.2s; }
+  .breakdown-item:hover { background: rgba(255,255,255,0.05); border-color: rgba(237, 102, 33, 0.2); }
+  
+  .item-meta { display: flex; align-items: center; gap: 12px; }
+  .item-label { display: block; font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 4px; }
   .item-hours { font-size: 12px; color: var(--text-secondary); }
-  .item-value { font-size: 16px; font-weight: 700; color: var(--ntv-orange); }
+  
+  .carry-tag { font-size: 10px; font-weight: 800; padding: 2px 8px; border-radius: 6px; text-transform: uppercase; }
+  .carry-tag.plus { background: rgba(52, 211, 153, 0.1); color: #34d399; }
+  .carry-tag.minus { background: rgba(248, 113, 113, 0.1); color: #f87171; }
+  
+  .item-values { display: flex; align-items: center; gap: 20px; }
+  
+  .payout-status { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
+  .payout-status.set { border-right: 2px solid #34d399; padding-right: 16px; align-items: flex-end; }
+  
+  .status-actions { display: flex; align-items: center; gap: 6px; }
+  .inline-form { display: flex; }
+  
+  .btn-received { 
+    background: rgba(52, 211, 153, 0.1); border: 1px solid rgba(52, 211, 153, 0.2); 
+    color: #34d399; padding: 6px 14px; border-radius: 8px; font-size: 10px; font-weight: 800; 
+    cursor: pointer; text-transform: uppercase; transition: all 0.2s; letter-spacing: 0.02em;
+    font-family: inherit;
+  }
+  .btn-received:hover { background: #34d399; color: #fff; border-color: #34d399; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(52, 211, 153, 0.2); }
+  
+  .btn-edit-payout { 
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); 
+    color: var(--text-secondary); padding: 6px 12px; border-radius: 8px; font-size: 10px; font-weight: 700; 
+    cursor: pointer; transition: all 0.2s; text-transform: uppercase;
+    font-family: inherit;
+  }
+  .btn-edit-payout:hover { background: rgba(255,255,255,0.12); color: #fff; border-color: rgba(255,255,255,0.2); }
+  .btn-edit-payout.secondary { background: none; border: 1px solid rgba(255,255,255,0.08); }
+  .btn-edit-payout.secondary:hover { background: rgba(255,255,255,0.05); }
+
+  .payout-edit-form { display: flex; align-items: center; gap: 8px; }
+  .compact-input-group { display: flex; align-items: center; gap: 6px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); padding: 4px 10px; border-radius: 10px; transition: 0.2s; }
+  .compact-input-group:focus-within { background: rgba(237, 102, 33, 0.05); border-color: rgba(237, 102, 33, 0.4); box-shadow: 0 0 12px rgba(237, 102, 33, 0.1); }
+  .v-currency { font-size: 14px; font-weight: 800; color: var(--ntv-orange); }
+  .v-amount-input { background: none; border: none; color: #fff; font-size: 16px; font-weight: 800; width: 90px; text-align: right; outline: none; font-family: inherit; }
+  .v-amount-input::-webkit-inner-spin-button { display: none; }
+  
+  .btn-save-inline { background: var(--ntv-gradient); border: none; color: #fff; width: 24px; height: 24px; border-radius: 6px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: 0.2s; }
+  .btn-save-inline:hover { transform: scale(1.1); filter: brightness(1.1); }
+  
+  .value-group { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+  .v-label { font-size: 9px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; }
+  .v-amount { font-size: 16px; font-weight: 800; color: #fff; }
+  .v-amount.accent { color: #34d399; }
+  
+  .carry-over-line { padding-left: 24px; position: relative; }
+  .carry-over-line::before { content: ''; position: absolute; left: 10px; top: -8px; bottom: 50%; width: 2px; border-left: 2px dashed rgba(255,255,255,0.1); border-bottom: 2px dashed rgba(255,255,255,0.1); border-bottom-left-radius: 8px; }
+  .line-text { font-size: 11px; font-weight: 600; color: var(--text-secondary); opacity: 0.7; }
+
   .empty-breakdown { text-align: center; padding: 32px; color: var(--text-secondary); font-size: 13px; font-style: italic; background: rgba(255,255,255,0.02); border-radius: 16px; border: 1px dashed rgba(255,255,255,0.1); }
 
   /* Setup Wizard Styles */

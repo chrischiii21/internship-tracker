@@ -1,10 +1,11 @@
 export interface GroupedEntry {
   label: string;
   totalSeconds: number;
+  firstDate: string; // ISO string of the first date in this group for sorting
 }
 
 export function groupEntries(entries: { date: string, durationSeconds: number }[], paySchedule: string): GroupedEntry[] {
-  const groups: Record<string, number> = {};
+  const groups: Record<string, { totalSeconds: number, firstDate: string }> = {};
 
   entries.forEach(entry => {
     const date = new Date(entry.date);
@@ -35,16 +36,22 @@ export function groupEntries(entries: { date: string, durationSeconds: number }[
       label = date.toLocaleString('en-US', { month: 'long', year: 'numeric' });
     }
 
-    groups[label] = (groups[label] || 0) + entry.durationSeconds;
+    if (!groups[label]) {
+      groups[label] = { totalSeconds: 0, firstDate: entry.date };
+    } else {
+      // Keep the earliest date as the representative
+      if (new Date(entry.date) < new Date(groups[label].firstDate)) {
+        groups[label].firstDate = entry.date;
+      }
+    }
+    groups[label].totalSeconds += entry.durationSeconds;
   });
 
   return Object.keys(groups).map(label => ({
     label,
-    totalSeconds: groups[label]
-  })).sort((a, b) => {
-    // Basic chronological sort based on labels if possible, or just return as is
-    return 0; 
-  });
+    totalSeconds: groups[label].totalSeconds,
+    firstDate: groups[label].firstDate
+  })).sort((a, b) => new Date(a.firstDate).getTime() - new Date(b.firstDate).getTime());
 }
 
 function getWeekNumber(d: Date): number {
