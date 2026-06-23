@@ -50,10 +50,10 @@ export async function getManualEntries(userId: string): Promise<TimeEntry[]> {
 export async function addManualEntry(entry: { userId: string, description: string, date: string, startTime: string, endTime: string }) {
   // Combine date and time to create full timestamps in Philippine Time
   const ensureSeconds = (t: string) => t.split(':').length === 2 ? `${t}:00` : t;
-  const startStr = `${entry.date}T${ensureSeconds(entry.startTime)}`;
-  const endStr = `${entry.date}T${ensureSeconds(entry.endTime)}`;
+  const startStr = `${entry.date}T${ensureSeconds(entry.startTime)}+08:00`;
+  const endStr = `${entry.date}T${ensureSeconds(entry.endTime)}+08:00`;
   
-  // We handle these as local times for the user (Asia/Manila)
+  // We handle these as local times for the user (Asia/Manila, UTC+8)
   const start = new Date(startStr);
   const end = new Date(endStr);
   
@@ -79,8 +79,8 @@ export async function addManualEntry(entry: { userId: string, description: strin
 
 export async function updateManualEntry(id: string, entry: { description: string, date: string, startTime: string, endTime: string }) {
   const ensureSeconds = (t: string) => t.split(':').length === 2 ? `${t}:00` : t;
-  const startStr = `${entry.date}T${ensureSeconds(entry.startTime)}`;
-  const endStr = `${entry.date}T${ensureSeconds(entry.endTime)}`;
+  const startStr = `${entry.date}T${ensureSeconds(entry.startTime)}+08:00`;
+  const endStr = `${entry.date}T${ensureSeconds(entry.endTime)}+08:00`;
   
   const start = new Date(startStr);
   const end = new Date(endStr);
@@ -190,7 +190,7 @@ export async function updateTimerStart(userId: string, startTimeStr: string) {
   const now = new Date();
   const dateStr = now.toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
   const ensureSeconds = (t: string) => t.split(':').length === 2 ? `${t}:00` : t;
-  const fullStart = new Date(`${dateStr}T${ensureSeconds(startTimeStr)}`);
+  const fullStart = new Date(`${dateStr}T${ensureSeconds(startTimeStr)}+08:00`);
   
   const { error } = await supabase
     .from('active_timers')

@@ -127,7 +127,7 @@ export async function saveAppSettings(userId: string, updated: Partial<AppSettin
         has_allowance: updated.hasAllowance ?? DEFAULT_SETTINGS.hasAllowance,
         pay_type: updated.payType || DEFAULT_SETTINGS.payType,
         pay_schedule: updated.paySchedule || DEFAULT_SETTINGS.paySchedule,
-        clockify_enabled: updated.clockifyEnabled ?? existingSettings.clockifyEnabled ?? DEFAULT_SETTINGS.clockifyEnabled,
+        clockify_enabled: updated.clockifyEnabled ?? DEFAULT_SETTINGS.clockifyEnabled,
         updated_at: new Date().toISOString()
       });
   }

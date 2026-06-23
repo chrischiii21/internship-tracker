@@ -178,7 +178,7 @@ const formatTo24hr = (timeStr: string) => {
                         class="inline-time-input time-mask"
                         maxlength="5"
                         value={new Date(activeTimer.startTime).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Manila' })} 
-                        onchange="document.getElementById('action-hidden').value='update-start'; this.form.submit();"
+                        onchange="document.getElementById('action-hidden').value='update-start'; if (typeof this.form.requestSubmit === 'function') { this.form.requestSubmit(); } else { this.form.submit(); }"
                       />
                     </div>
                   )}
@@ -365,20 +365,37 @@ const formatTo24hr = (timeStr: string) => {
     window.history.replaceState({}, '', newUrl);
   }
 
-  const timerSection = document.querySelector('.main-control');
-  const timerVal = document.getElementById('live-timer-val');
-  if (timerSection && timerSection.classList.contains('timer-active')) {
-    const startTime = new Date(timerSection.dataset.start || '').getTime();
-    if (startTime) {
-      setInterval(() => {
-        const diff = Math.max(0, new Date().getTime() - startTime);
-        const h = Math.floor(diff / 3600000);
-        const m = Math.floor((diff % 3600000) / 60000);
-        const s = Math.floor((diff % 60000) / 1000);
-        timerVal.textContent = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-      }, 1000);
+  // Live Timer Setup
+  let timerInterval = null;
+  function initLiveTimer() {
+    if (timerInterval) {
+      clearInterval(timerInterval);
+      timerInterval = null;
+    }
+    const timerSection = document.querySelector('.main-control');
+    const timerVal = document.getElementById('live-timer-val');
+    if (timerSection && timerSection.classList.contains('timer-active')) {
+      const startTime = new Date(timerSection.dataset.start || '').getTime();
+      if (startTime) {
+        const tick = () => {
+          const diff = Math.max(0, new Date().getTime() - startTime);
+          const h = Math.floor(diff / 3600000);
+          const m = Math.floor((diff % 3600000) / 60000);
+          const s = Math.floor((diff % 60000) / 1000);
+          if (timerVal) {
+            timerVal.textContent = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+          }
+        };
+        tick();
+        timerInterval = setInterval(tick, 1000);
+      }
+    } else if (timerVal) {
+      timerVal.textContent = "00:00:00";
     }
   }
+
+  // Initialize timer on load
+  initLiveTimer();
 
   window.openEditModal = function(id, desc, date, start, end) {
     document.getElementById('edit-id').value = id;
@@ -399,7 +416,127 @@ const formatTo24hr = (timeStr: string) => {
     if (!deleteTargetId) return;
     document.getElementById('action-hidden').value = 'delete';
     document.getElementById('id-hidden').value = deleteTargetId;
-    document.getElementById('timer-main-form').submit();
+    const form = document.getElementById('timer-main-form');
+    if (form) {
+      if (typeof form.requestSubmit === 'function') {
+        form.requestSubmit();
+      } else {
+        form.submit();
+      }
+    }
+  }
+
+  // Intercept all POST form submissions on this page for AJAX swapping
+  document.addEventListener('submit', async (e) => {
+    const form = e.target;
+    if (form && form.method.toUpperCase() === 'POST') {
+      const actionAttr = form.getAttribute('action');
+      if (actionAttr && actionAttr.startsWith('/api/')) {
+        // Let standard API post requests happen normally (they redirect anyway)
+        return;
+      }
+      
+      e.preventDefault();
+      await handleFormSubmit(form, e);
+    }
+  });
+
+  async function handleFormSubmit(form, event) {
+    const btn = form.querySelector('button[type="submit"]');
+    
+    if (btn) {
+      btn.disabled = true;
+      btn.style.opacity = '0.7';
+    }
+
+    try {
+      const formData = new FormData(form);
+      
+      // If a specific submit button triggered the submission, append its action values
+      if (event && event.submitter) {
+        const submitter = event.submitter;
+        if (submitter.name) {
+          formData.append(submitter.name, submitter.value);
+        }
+      }
+
+      const response = await fetch(window.location.pathname, {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!response.ok) {
+        throw new Error('Network response was not ok');
+      }
+
+      // Check if we were redirected to a completely different path (e.g., login page)
+      const finalUrl = new URL(response.url);
+      if (finalUrl.pathname !== window.location.pathname) {
+        window.location.href = response.url;
+        return;
+      }
+
+      const html = await response.text();
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, 'text/html');
+
+      // 1. Swap main control (timer UI)
+      const newMainControl = doc.querySelector('.main-control');
+      const oldMainControl = document.querySelector('.main-control');
+      if (newMainControl && oldMainControl) {
+        oldMainControl.replaceWith(newMainControl);
+      }
+
+      // 2. Swap activity logs list
+      const newLogList = doc.querySelector('.log-list');
+      const oldLogList = document.querySelector('.log-list');
+      if (newLogList && oldLogList) {
+        oldLogList.replaceWith(newLogList);
+      }
+
+      // 3. Swap stats box
+      const newStatsBox = doc.querySelector('.stats-box');
+      const oldStatsBox = document.querySelector('.stats-box');
+      if (newStatsBox && oldStatsBox) {
+        oldStatsBox.replaceWith(newStatsBox);
+      }
+
+      // 4. Reset manual add form (if this was the one submitted)
+      if (form.classList.contains('side-form')) {
+        form.reset();
+        const dateInput = form.querySelector('input[type="date"]');
+        if (dateInput) {
+          dateInput.value = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
+        }
+      }
+
+      // 5. Close modals if they were open
+      const editModal = document.getElementById('edit-modal');
+      if (editModal) editModal.style.display = 'none';
+      const deleteModal = document.getElementById('delete-log-modal');
+      if (deleteModal) deleteModal.style.display = 'none';
+
+      // Re-initialize live timer
+      initLiveTimer();
+
+      // Show toast if success/error parameter is in the redirect URL
+      const successMsg = finalUrl.searchParams.get('success');
+      const errorMsg = finalUrl.searchParams.get('error');
+      if (successMsg) {
+        window.showToast(decodeURIComponent(successMsg), 'success');
+      } else if (errorMsg) {
+        window.showToast(decodeURIComponent(errorMsg), 'error');
+      }
+
+    } catch (err) {
+      console.error(err);
+      window.showToast('An error occurred. Please try again.', 'error');
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.style.opacity = '';
+      }
+    }
   }
 
   // Time Masking Logic

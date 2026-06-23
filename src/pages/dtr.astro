@@ -58,7 +58,7 @@ let totalMonthSeconds = 0;
 // Unified Logic: Combined Manual + Clockify
 const manual = await getManualEntries(viewUserId);
 const manualFiltered = manual.filter((e) => {
-  const d = new Date(e.startFull || `${e.date}T${e.startTime}`);
+  const d = new Date(e.startFull || `${e.date}T${e.startTime}+08:00`);
   return d.getMonth() + 1 === month && d.getFullYear() === year;
 });
 

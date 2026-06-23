@@ -2,7 +2,18 @@ import { supabase } from './supabase';
 
 const CLOCKIFY_API_URL = 'https://api.clockify.me/api/v1';
 
+// In-memory cache for Clockify lookup and time entry responses to speed up page rendering
+const userCache = new Map<string, { data: any, expiry: number }>();
+const hoursCache = new Map<string, { data: any, expiry: number }>();
+const dtrEntriesCache = new Map<string, { data: any, expiry: number }>();
+
 export async function getClockifyUser(email: string) {
+  const cacheKey = email.toLowerCase();
+  const cached = userCache.get(cacheKey);
+  if (cached && cached.expiry > Date.now()) {
+    return cached.data;
+  }
+
   const apiKey = import.meta.env.CLOCKIFY_API_KEY;
   const workspaceId = import.meta.env.CLOCKIFY_WORKSPACE_ID;
   if (!apiKey || !workspaceId) return null;
@@ -12,11 +23,21 @@ export async function getClockifyUser(email: string) {
     });
     if (!response.ok) return null;
     const users = await response.json();
-    return users.find((u: any) => u.email.toLowerCase() === email.toLowerCase());
+    const user = users.find((u: any) => u.email.toLowerCase() === cacheKey);
+    
+    // Cache user lookup for 30 minutes
+    userCache.set(cacheKey, { data: user, expiry: Date.now() + 30 * 60 * 1000 });
+    return user;
   } catch { return null; }
 }
 
 export async function getRenderedHours(clockifyUserId: string, startDate?: string) {
+  const cacheKey = `${clockifyUserId}_${startDate || ''}`;
+  const cached = hoursCache.get(cacheKey);
+  if (cached && cached.expiry > Date.now()) {
+    return cached.data;
+  }
+
   const apiKey = import.meta.env.CLOCKIFY_API_KEY;
   const workspaceId = import.meta.env.CLOCKIFY_WORKSPACE_ID;
   let totalSeconds = 0;
@@ -49,7 +70,10 @@ export async function getRenderedHours(clockifyUserId: string, startDate?: strin
       if (entries.length < pageSize) hasMore = false;
     }
   }
-  return { totalHours: totalSeconds / 3600, entries: allEntries };
+  const result = { totalHours: totalSeconds / 3600, entries: allEntries };
+  // Cache rendered hours summary for 2 minutes
+  hoursCache.set(cacheKey, { data: result, expiry: Date.now() + 2 * 60 * 1000 });
+  return result;
 }
 
 export async function getStudentProgress(userId: string, email: string, startDate?: string) {
@@ -102,25 +126,36 @@ export async function getDailyDTR(clockifyUserId: string, month: number, year: n
 
   // 2. Collect Clockify Entries
   if (clockifyUserId && apiKey && workspaceId) {
-    try {
-      const startIso = new Date(year, month - 1, 1).toISOString();
-      const endIso = new Date(year, month, 0, 23, 59, 59).toISOString();
-      const response = await fetch(
-        `${CLOCKIFY_API_URL}/workspaces/${workspaceId}/user/${clockifyUserId}/time-entries?start=${startIso}&end=${endIso}&page-size=1000`,
-        { headers: { 'X-Api-Key': apiKey } }
-      );
-      if (response.ok) {
-        const entries = await response.json();
-        for (const entry of entries) {
-          if (entry.timeInterval && entry.timeInterval.end) {
-            const s = new Date(entry.timeInterval.start);
-            const e = new Date(entry.timeInterval.end);
-            const dur = parseIsoDuration(entry.timeInterval.duration);
-            allEntries.push({ start: s, end: e, duration: dur });
-          }
+    const cacheKey = `${clockifyUserId}_${year}_${month}`;
+    const cached = dtrEntriesCache.get(cacheKey);
+    let clockifyEntries = [];
+
+    if (cached && cached.expiry > Date.now()) {
+      clockifyEntries = cached.data;
+    } else {
+      try {
+        const startIso = new Date(year, month - 1, 1).toISOString();
+        const endIso = new Date(year, month, 0, 23, 59, 59).toISOString();
+        const response = await fetch(
+          `${CLOCKIFY_API_URL}/workspaces/${workspaceId}/user/${clockifyUserId}/time-entries?start=${startIso}&end=${endIso}&page-size=1000`,
+          { headers: { 'X-Api-Key': apiKey } }
+        );
+        if (response.ok) {
+          clockifyEntries = await response.json();
+          // Cache monthly entries for 2 minutes
+          dtrEntriesCache.set(cacheKey, { data: clockifyEntries, expiry: Date.now() + 2 * 60 * 1000 });
         }
+      } catch (e) {}
+    }
+
+    for (const entry of clockifyEntries) {
+      if (entry.timeInterval && entry.timeInterval.end) {
+        const s = new Date(entry.timeInterval.start);
+        const e = new Date(entry.timeInterval.end);
+        const dur = parseIsoDuration(entry.timeInterval.duration);
+        allEntries.push({ start: s, end: e, duration: dur });
       }
-    } catch (e) {}
+    }
   }
 
   // 3. Process day-by-day
