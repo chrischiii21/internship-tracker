@@ -297,20 +297,16 @@ const formatTo24hr = (timeStr: string) => {
                         <label>Start Time</label>
                         <div class="time-12hr-wrapper">
                           <input type="text" name="startTime" placeholder="08:00" pattern="(0?[1-9]|1[0-2]):[0-5][0-9]" maxlength="5" class="time-mask" required />
-                          <select name="startAmpm" class="ampm-select">
-                            <option value="AM">AM</option>
-                            <option value="PM">PM</option>
-                          </select>
+                          <button type="button" class="ampm-toggle-btn" data-input-name="startAmpm">AM</button>
+                          <input type="hidden" name="startAmpm" value="AM" />
                         </div>
                       </div>
                       <div class="input-group">
                         <label>End Time</label>
                         <div class="time-12hr-wrapper">
                           <input type="text" name="endTime" placeholder="05:00" pattern="(0?[1-9]|1[0-2]):[0-5][0-9]" maxlength="5" class="time-mask" required />
-                          <select name="endAmpm" class="ampm-select">
-                            <option value="AM">AM</option>
-                            <option value="PM" selected>PM</option>
-                          </select>
+                          <button type="button" class="ampm-toggle-btn active" data-input-name="endAmpm">PM</button>
+                          <input type="hidden" name="endAmpm" value="PM" />
                         </div>
                       </div>
                     </div>
@@ -350,20 +346,16 @@ const formatTo24hr = (timeStr: string) => {
                 <label>Start Time</label>
                 <div class="time-12hr-wrapper">
                   <input type="text" name="startTime" id="edit-start" placeholder="08:00" pattern="(0?[1-9]|1[0-2]):[0-5][0-9]" maxlength="5" class="time-mask" required />
-                  <select name="startAmpm" id="edit-start-ampm" class="ampm-select">
-                    <option value="AM">AM</option>
-                    <option value="PM">PM</option>
-                  </select>
+                  <button type="button" class="ampm-toggle-btn" id="edit-start-ampm-btn" data-input-name="startAmpm">AM</button>
+                  <input type="hidden" name="startAmpm" id="edit-start-ampm" value="AM" />
                 </div>
               </div>
               <div class="form-group">
                 <label>End Time</label>
                 <div class="time-12hr-wrapper">
                   <input type="text" name="endTime" id="edit-end" placeholder="05:00" pattern="(0?[1-9]|1[0-2]):[0-5][0-9]" maxlength="5" class="time-mask" required />
-                  <select name="endAmpm" id="edit-end-ampm" class="ampm-select">
-                    <option value="AM">AM</option>
-                    <option value="PM">PM</option>
-                  </select>
+                  <button type="button" class="ampm-toggle-btn" id="edit-end-ampm-btn" data-input-name="endAmpm">AM</button>
+                  <input type="hidden" name="endAmpm" id="edit-end-ampm" value="AM" />
                 </div>
               </div>
             </div>
@@ -468,10 +460,28 @@ const formatTo24hr = (timeStr: string) => {
     const start12 = convert24to12(start);
     document.getElementById('edit-start').value = start12.time;
     document.getElementById('edit-start-ampm').value = start12.ampm;
+    const startBtn = document.getElementById('edit-start-ampm-btn');
+    if (startBtn) {
+      startBtn.textContent = start12.ampm;
+      if (start12.ampm === 'PM') {
+        startBtn.classList.add('active');
+      } else {
+        startBtn.classList.remove('active');
+      }
+    }
     
     const end12 = convert24to12(end);
     document.getElementById('edit-end').value = end12.time;
     document.getElementById('edit-end-ampm').value = end12.ampm;
+    const endBtn = document.getElementById('edit-end-ampm-btn');
+    if (endBtn) {
+      endBtn.textContent = end12.ampm;
+      if (end12.ampm === 'PM') {
+        endBtn.classList.add('active');
+      } else {
+        endBtn.classList.remove('active');
+      }
+    }
     
     document.getElementById('edit-modal').style.display = 'flex';
   }
@@ -578,6 +588,17 @@ const formatTo24hr = (timeStr: string) => {
         if (dateInput) {
           dateInput.value = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
         }
+        // Reset start and end ampm toggle buttons visually
+        const startBtn = form.querySelector('[data-input-name="startAmpm"]');
+        if (startBtn) {
+          startBtn.classList.remove('active');
+          startBtn.textContent = 'AM';
+        }
+        const endBtn = form.querySelector('[data-input-name="endAmpm"]');
+        if (endBtn) {
+          endBtn.classList.add('active');
+          endBtn.textContent = 'PM';
+        }
       }
 
       // 5. Close modals if they were open
@@ -642,6 +663,31 @@ const formatTo24hr = (timeStr: string) => {
     if (e.target.classList.contains('time-mask') && e.key === 'Backspace') {
       if (e.target.value.includes(':') && e.target.value.length === 5) {
          // Let normal backspace work
+      }
+    }
+  });
+
+  // Handle click toggling on AM/PM buttons
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.ampm-toggle-btn');
+    if (btn) {
+      e.preventDefault();
+      const isPM = btn.classList.contains('active');
+      const inputName = btn.dataset.inputName;
+      const form = btn.closest('form');
+      if (form) {
+        const input = form.querySelector(`input[name="${inputName}"]`);
+        if (input) {
+          if (isPM) {
+            btn.classList.remove('active');
+            btn.textContent = 'AM';
+            input.value = 'AM';
+          } else {
+            btn.classList.add('active');
+            btn.textContent = 'PM';
+            input.value = 'PM';
+          }
+        }
       }
     }
   });
@@ -761,8 +807,8 @@ const formatTo24hr = (timeStr: string) => {
   .edit-form .form-group { display: flex; flex-direction: column; gap: 6px; }
   .edit-form .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
   .edit-form label { font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; }
-  .edit-form input { background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 10px 14px; color: #fff; font-size: 14px; outline: none; }
-  .edit-form input:focus { border-color: var(--ntv-orange); }
+  .edit-form > input, .edit-form .form-group > input { background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 10px 14px; color: #fff; font-size: 14px; outline: none; }
+  .edit-form > input:focus, .edit-form .form-group > input:focus { border-color: var(--ntv-orange); }
   
   .modal-actions { display: grid; grid-template-columns: 1fr 1.5fr; gap: 12px; margin-top: 12px; }
   .btn-cancel { background: rgba(255,255,255,0.05); border: 1px solid var(--border-subtle); color: #fff; padding: 12px; border-radius: 10px; cursor: pointer; font-weight: 600; }
@@ -780,17 +826,17 @@ const formatTo24hr = (timeStr: string) => {
   
   .side-form { display: flex; flex-direction: column; gap: 14px; }
   .input-group label { display: block; font-size: 10px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; margin-bottom: 6px; }
-  .input-group input { 
+  .input-group > input { 
     width: 100%; background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle);
     border-radius: 8px; padding: 10px 12px; color: white; font-size: 13px;
   }
   .input-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .time-12hr-wrapper { display: flex; align-items: center; background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle); border-radius: 8px; padding-right: 6px; transition: border-color 0.2s, background-color 0.2s; width: 100%; }
+  .time-12hr-wrapper { display: flex; align-items: center; background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle); border-radius: 8px; padding-right: 4px; transition: border-color 0.2s, background-color 0.2s; width: 100%; }
   .time-12hr-wrapper input { border: none !important; background: transparent !important; flex: 1; padding: 10px 12px; width: 100%; color: white; font-size: 13px; outline: none; }
   .time-12hr-wrapper:focus-within { border-color: var(--ntv-orange); background: rgba(237, 102, 33, 0.04); }
-  .ampm-select { background: rgba(255,255,255,0.05); border: 1px solid var(--border-subtle); color: var(--ntv-orange); font-size: 11px; font-weight: 700; padding: 4px 6px; border-radius: 6px; cursor: pointer; outline: none; transition: 0.15s; }
-  .ampm-select:hover { background: rgba(237, 102, 33, 0.1); color: white; }
-  .ampm-select option { background: #0d1421; color: white; }
+  .ampm-toggle-btn { background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-subtle); color: var(--text-secondary); font-size: 10px; font-weight: 800; padding: 6px 12px; border-radius: 6px; cursor: pointer; transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1); outline: none; user-select: none; }
+  .ampm-toggle-btn:hover { background: rgba(255, 255, 255, 0.08); color: white; }
+  .ampm-toggle-btn.active { background: var(--ntv-gradient); border-color: transparent; color: white; box-shadow: 0 2px 10px rgba(237, 102, 33, 0.2); }
   
   .btn-outline { 
     margin-top: 4px; background: transparent; border: 1px solid var(--ntv-orange); 
