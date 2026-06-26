@@ -79,10 +79,14 @@ if (Astro.request.method === 'POST') {
     const endTimeRaw = formData.get('endTime') as string;
     const startAmpm = formData.get('startAmpm') as string;
     const endAmpm = formData.get('endAmpm') as string;
+
+    const documentationUrlsRaw = formData.get('documentationUrls') as string;
+    const documentationUrls = documentationUrlsRaw ? JSON.parse(documentationUrlsRaw) : [];
+
     const startTime = convert12to24(startTimeRaw, startAmpm);
     const endTime = convert12to24(endTimeRaw, endAmpm);
     try {
-      await addManualEntry({ userId: user.id, description, date, startTime, endTime });
+      await addManualEntry({ userId: user.id, description, date, startTime, endTime, documentationUrls });
       const { addSyncLog } = await import('../lib/logs');
       await addSyncLog({ userId: user.id, type: 'Mode', status: 'Success', details: `Manual entry added: ${description || 'No description'}` });
       return Astro.redirect('/tracker?success=Manual entry added');
@@ -99,10 +103,14 @@ if (Astro.request.method === 'POST') {
     const endTimeRaw = formData.get('endTime') as string;
     const startAmpm = formData.get('startAmpm') as string;
     const endAmpm = formData.get('endAmpm') as string;
+
+    const documentationUrlsRaw = formData.get('documentationUrls') as string;
+    const documentationUrls = documentationUrlsRaw ? JSON.parse(documentationUrlsRaw) : [];
+
     const startTime = convert12to24(startTimeRaw, startAmpm);
     const endTime = convert12to24(endTimeRaw, endAmpm);
     try {
-      await updateManualEntry(id, { description, date, startTime, endTime });
+      await updateManualEntry(id, { description, date, startTime, endTime, documentationUrls });
       const { addSyncLog } = await import('../lib/logs');
       await addSyncLog({ userId: user.id, type: 'Mode', status: 'Success', details: `Entry updated: ${description || 'No description'}` });
       return Astro.redirect('/tracker?success=Activity log updated');
@@ -122,7 +130,92 @@ if (Astro.request.method === 'POST') {
 
 const entries = await getManualEntries(user.id);
 const activeTimer = await getActiveTimer(user.id);
-const totalSeconds = entries.reduce((acc, e) => acc + e.durationSeconds, 0);
+
+const startDateParam = Astro.url.searchParams.get('startDate') || '';
+const endDateParam = Astro.url.searchParams.get('endDate') || '';
+
+let filteredEntries = entries;
+if (startDateParam) {
+  filteredEntries = filteredEntries.filter(e => e.date >= startDateParam);
+}
+if (endDateParam) {
+  filteredEntries = filteredEntries.filter(e => e.date <= endDateParam);
+}
+
+const totalSeconds = filteredEntries.reduce((acc, e) => acc + e.durationSeconds, 0);
+
+// Group entries by Month and Date
+const sortedEntries = [...filteredEntries].sort((a, b) => {
+  const dateCompare = b.date.localeCompare(a.date);
+  if (dateCompare !== 0) return dateCompare;
+  return b.startTime.localeCompare(a.startTime);
+});
+
+interface DateGroup {
+  dateKey: string;
+  dateDisplay: string;
+  totalSeconds: number;
+  entries: typeof entries;
+}
+
+interface MonthGroup {
+  monthKey: string; // YYYY-MM
+  monthName: string;
+  totalSeconds: number;
+  dateGroups: DateGroup[];
+}
+
+const monthsMap = new Map<string, MonthGroup>();
+
+for (const entry of sortedEntries) {
+  const monthKey = entry.date.substring(0, 7); // "YYYY-MM"
+  const dateKey = entry.date; // "YYYY-MM-DD"
+
+  // 1. Resolve Month Group
+  if (!monthsMap.has(monthKey)) {
+    const [year, month] = monthKey.split('-');
+    const monthNames = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
+    ];
+    const monthName = `${monthNames[parseInt(month, 10) - 1]} ${year}`;
+    monthsMap.set(monthKey, {
+      monthKey,
+      monthName,
+      totalSeconds: 0,
+      dateGroups: []
+    });
+  }
+
+  const monthGroup = monthsMap.get(monthKey)!;
+  monthGroup.totalSeconds += entry.durationSeconds;
+
+  // 2. Resolve Date Group within Month
+  let dateGroup = monthGroup.dateGroups.find(dg => dg.dateKey === dateKey);
+  if (!dateGroup) {
+    const dateObj = new Date(entry.date + 'T00:00:00+08:00');
+    const options: Intl.DateTimeFormatOptions = { 
+      weekday: 'long', 
+      month: 'short', 
+      day: 'numeric', 
+      timeZone: 'Asia/Manila' 
+    };
+    const dateDisplay = dateObj.toLocaleDateString('en-US', options);
+
+    dateGroup = {
+      dateKey,
+      dateDisplay,
+      totalSeconds: 0,
+      entries: []
+    };
+    monthGroup.dateGroups.push(dateGroup);
+  }
+
+  dateGroup.entries.push(entry);
+  dateGroup.totalSeconds += entry.durationSeconds;
+}
+
+const groupedEntries = Array.from(monthsMap.values()).sort((a, b) => b.monthKey.localeCompare(a.monthKey));
 
 const formatTo24hr = (timeStr: string) => {
   if (!timeStr) return '';
@@ -233,36 +326,98 @@ const formatTo24hr = (timeStr: string) => {
             <div class="content-grid">
               <!-- Left: History -->
               <div class="history-column">
-                <h2 class="column-title">Activity Logs</h2>
+                <div class="history-header">
+                  <h2 class="column-title">Activity Logs</h2>
+                  
+                  <div class="date-filters">
+                    <div class="date-input-group">
+                      <label for="filter-start-date">From</label>
+                      <input 
+                        type="date" 
+                        id="filter-start-date" 
+                        value={startDateParam} 
+                        class="filter-date-input"
+                      />
+                    </div>
+                    <div class="date-input-group">
+                      <label for="filter-end-date">To</label>
+                      <input 
+                        type="date" 
+                        id="filter-end-date" 
+                        value={endDateParam} 
+                        class="filter-date-input"
+                      />
+                    </div>
+                    {(startDateParam || endDateParam) && (
+                      <button type="button" class="btn-clear-filter" id="btn-reset-filters" title="Clear Filters">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                </div>
+
                 <div class="log-list">
-                  {entries.length > 0 ? entries.sort((a,b) => b.date.localeCompare(a.date)).map(entry => (
-                    <div class="log-card">
-                      <div class="log-info">
-                        <span class="log-title">{entry.description || 'General Work'}</span>
-                        <div class="log-sub">
-                          <span class="date">{new Date(entry.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'Asia/Manila' })}</span>
-                          <span class="dot">·</span>
-                          <span class="time">{formatTo24hr(entry.startTime)} — {formatTo24hr(entry.endTime)}</span>
-                        </div>
+                  {groupedEntries.length > 0 ? groupedEntries.map(group => (
+                    <div class="month-group">
+                      <div class="month-header">
+                        <span class="month-name">{group.monthName}</span>
+                        <span class="month-hours">{formatHours(group.totalSeconds / 3600)}</span>
                       </div>
-                      <div class="log-actions">
-                        <span class="log-hours">{formatHours(entry.durationSeconds / 3600)}</span>
-                        <div class="action-group">
-                          <button 
-                            class="edit-icon" 
-                            title="Edit Entry"
-                            onclick={`window.openEditModal('${entry.id}', '${entry.description}', '${entry.date}', '${entry.startTime}', '${entry.endTime}')`}
-                          >
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                          </button>
-                          <button 
-                            type="button"
-                            class="delete-icon" 
-                            onclick={`window.openDeleteModal('${entry.id}')`}
-                          >
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                          </button>
-                        </div>
+                      <div class="month-dates">
+                        {group.dateGroups.map(dateGroup => (
+                          <div class="date-group-card">
+                            <div class="date-group-header">
+                              <span class="date-group-title">{dateGroup.dateDisplay}</span>
+                              <span class="date-group-hours">{formatHours(dateGroup.totalSeconds / 3600)}</span>
+                            </div>
+                            <div class="shift-list">
+                              {dateGroup.entries.map(entry => (
+                                <div class="shift-item">
+                                  <div class="shift-info">
+                                    <span class="shift-title">{entry.description || 'General Work'}</span>
+                                    <div class="shift-sub">
+                                      <span class="time">{formatTo24hr(entry.startTime)} — {formatTo24hr(entry.endTime)}</span>
+                                    </div>
+                                    {entry.documentationUrls && entry.documentationUrls.length > 0 && (
+                                      <div class="entry-doc-preview">
+                                        {entry.documentationUrls.map(url => (
+                                          <div class="doc-thumb-container">
+                                            <a href={url} target="_blank" class="doc-thumb-link" title="View documentation">
+                                              <img src={url} alt="Proof" class="doc-thumb" />
+                                            </a>
+                                            <a href={`/api/download?url=${encodeURIComponent(url)}`} class="doc-download-btn" title="Download proof">
+                                              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                            </a>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div class="shift-actions">
+                                    <span class="shift-hours">{formatHours(entry.durationSeconds / 3600)}</span>
+                                    <div class="action-group">
+                                      <button 
+                                        class="edit-icon" 
+                                        title="Edit Entry"
+                                        onclick={`window.openEditModal('${entry.id}', '${entry.description.replace(/'/g, "\\'")}', '${entry.date}', '${entry.startTime}', '${entry.endTime}', ${JSON.stringify(entry.documentationUrls)})`}
+                                      >
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                                      </button>
+                                      <button 
+                                        type="button"
+                                        class="delete-icon" 
+                                        onclick={`window.openDeleteModal('${entry.id}')`}
+                                      >
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
                   )) : (
@@ -284,6 +439,7 @@ const formatTo24hr = (timeStr: string) => {
                   <h3 class="box-title">Manual Adjustment</h3>
                   <form method="POST" class="side-form">
                     <input type="hidden" name="action" value="add" />
+                    <input type="hidden" name="documentationUrls" id="add-doc-urls" value="[]" />
                     <div class="input-group">
                       <label>Task Description</label>
                       <input type="text" name="description" placeholder="What did you do?" required />
@@ -311,6 +467,17 @@ const formatTo24hr = (timeStr: string) => {
                       </div>
                     </div>
                     <p class="input-hint">Use 12-hour format (e.g., 08:00 to 05:00). Click the AM/PM badge next to the field to toggle AM/PM.</p>
+                    
+                    <div class="input-group">
+                      <label>Documentation / Proof (Images)</label>
+                      <div class="file-upload-zone" id="add-upload-zone">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="upload-icon"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                        <span>Click to upload or drag images</span>
+                        <input type="file" id="add-file-input" multiple accept="image/*" class="hidden-file-input" />
+                      </div>
+                      <div class="preview-grid mt-8" id="add-preview-grid"></div>
+                    </div>
+
                     <button type="submit" class="btn-outline">Add Entry</button>
                   </form>
                 </div>
@@ -332,6 +499,7 @@ const formatTo24hr = (timeStr: string) => {
           <form method="POST" class="edit-form">
             <input type="hidden" name="action" value="edit" />
             <input type="hidden" name="id" id="edit-id" />
+            <input type="hidden" name="documentationUrls" id="edit-doc-urls" value="[]" />
             
             <div class="form-group">
               <label>Task Description</label>
@@ -361,6 +529,16 @@ const formatTo24hr = (timeStr: string) => {
             </div>
             <p class="input-hint mt-8">Use 12-hour format (e.g., 08:00 to 05:00). Click the AM/PM badge next to the field to toggle AM/PM.</p>
             
+            <div class="form-group">
+              <label>Documentation / Proof (Images)</label>
+              <div class="file-upload-zone" id="edit-upload-zone">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="upload-icon"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                <span>Click to upload or drag images</span>
+                <input type="file" id="edit-file-input" multiple accept="image/*" class="hidden-file-input" />
+              </div>
+              <div class="preview-grid mt-8" id="edit-preview-grid"></div>
+            </div>
+
             <div class="modal-actions">
               <button type="button" class="btn-cancel" onclick="document.getElementById('edit-modal').style.display='none'">Cancel</button>
               <button type="submit" class="btn-save">Save Changes</button>
@@ -434,6 +612,161 @@ const formatTo24hr = (timeStr: string) => {
   // Initialize timer on load
   initLiveTimer();
 
+  // Date Filters Event Listeners
+  const filterStart = document.getElementById('filter-start-date');
+  const filterEnd = document.getElementById('filter-end-date');
+  const btnReset = document.getElementById('btn-reset-filters');
+
+  function updateFilters() {
+    const params = new URLSearchParams(window.location.search);
+    if (filterStart && filterStart.value) {
+      params.set('startDate', filterStart.value);
+    } else {
+      params.delete('startDate');
+    }
+    if (filterEnd && filterEnd.value) {
+      params.set('endDate', filterEnd.value);
+    } else {
+      params.delete('endDate');
+    }
+    window.location.search = params.toString();
+  }
+
+  if (filterStart) {
+    filterStart.addEventListener('change', updateFilters);
+  }
+  if (filterEnd) {
+    filterEnd.addEventListener('change', updateFilters);
+  }
+  if (btnReset) {
+    btnReset.addEventListener('click', () => {
+      const params = new URLSearchParams(window.location.search);
+      params.delete('startDate');
+      params.delete('endDate');
+      window.location.search = params.toString();
+    });
+  }
+
+  let addSelectedFiles = [];
+  let editSelectedFiles = [];
+  let editExistingUrls = [];
+
+  function setupUploadZone(zoneId, inputId, previewGridId, isEdit) {
+    const zone = document.getElementById(zoneId);
+    const input = document.getElementById(inputId);
+    if (!zone || !input) return;
+
+    // Remove existing event listeners to avoid duplicates
+    const newZone = zone.cloneNode(true);
+    zone.parentNode.replaceChild(newZone, zone);
+    
+    const newInput = input.cloneNode(true);
+    input.parentNode.replaceChild(newInput, input);
+
+    newZone.addEventListener('click', () => newInput.click());
+
+    newZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      newZone.classList.add('dragover');
+    });
+
+    newZone.addEventListener('dragleave', () => {
+      newZone.classList.remove('dragover');
+    });
+
+    newZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      newZone.classList.remove('dragover');
+      if (e.dataTransfer.files) {
+        handleFiles(e.dataTransfer.files, isEdit, previewGridId);
+      }
+    });
+
+    newInput.addEventListener('change', () => {
+      if (newInput.files) {
+        handleFiles(newInput.files, isEdit, previewGridId);
+      }
+    });
+  }
+
+  function handleFiles(files, isEdit, previewGridId) {
+    const arr = isEdit ? editSelectedFiles : addSelectedFiles;
+    for (let i = 0; i < files.length; i++) {
+      if (files[i].type.startsWith('image/')) {
+        arr.push(files[i]);
+      } else {
+        window.showToast('Only image files are allowed.', 'error');
+      }
+    }
+    renderAllPreviews(isEdit, previewGridId);
+  }
+
+  function renderAllPreviews(isEdit, previewGridId) {
+    const grid = document.getElementById(previewGridId);
+    if (!grid) return;
+    grid.innerHTML = '';
+
+    const existingUrls = isEdit ? editExistingUrls : [];
+    const localFiles = isEdit ? editSelectedFiles : addSelectedFiles;
+
+    existingUrls.forEach((url, idx) => {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'preview-thumb-wrapper';
+      
+      const img = document.createElement('img');
+      img.src = url;
+      img.className = 'preview-thumb';
+      wrapper.appendChild(img);
+
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'preview-del-btn';
+      delBtn.innerHTML = '&times;';
+      delBtn.onclick = () => {
+        existingUrls.splice(idx, 1);
+        document.getElementById(isEdit ? 'edit-doc-urls' : 'add-doc-urls').value = JSON.stringify(existingUrls);
+        renderAllPreviews(isEdit, previewGridId);
+      };
+      wrapper.appendChild(delBtn);
+      grid.appendChild(wrapper);
+    });
+
+    localFiles.forEach((file, idx) => {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'preview-thumb-wrapper local';
+      
+      const img = document.createElement('img');
+      img.src = URL.createObjectURL(file);
+      img.className = 'preview-thumb';
+      wrapper.appendChild(img);
+
+      const badge = document.createElement('span');
+      badge.className = 'preview-badge';
+      badge.textContent = 'PENDING';
+      wrapper.appendChild(badge);
+
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'preview-del-btn';
+      delBtn.innerHTML = '&times;';
+      delBtn.onclick = () => {
+        localFiles.splice(idx, 1);
+        renderAllPreviews(isEdit, previewGridId);
+      };
+      wrapper.appendChild(delBtn);
+      grid.appendChild(wrapper);
+    });
+  }
+
+  // Initialize upload zones
+  document.addEventListener('DOMContentLoaded', () => {
+    setupUploadZone('add-upload-zone', 'add-file-input', 'add-preview-grid', false);
+  });
+  // Also hook immediately for direct page access
+  setTimeout(() => {
+    setupUploadZone('add-upload-zone', 'add-file-input', 'add-preview-grid', false);
+  }, 100);
+
   function convert24to12(timeStr) {
     if (!timeStr) return { time: '', ampm: 'AM' };
     const parts = timeStr.split(':');
@@ -452,11 +785,23 @@ const formatTo24hr = (timeStr: string) => {
     };
   }
 
-  window.openEditModal = function(id, desc, date, start, end) {
+  window.openEditModal = function(id, desc, date, start, end, docUrls) {
     document.getElementById('edit-id').value = id;
     document.getElementById('edit-desc').value = desc;
     document.getElementById('edit-date').value = date;
     
+    let urls = [];
+    if (docUrls) {
+      urls = Array.isArray(docUrls) ? docUrls : JSON.parse(docUrls);
+    }
+    editExistingUrls = [...urls];
+    editSelectedFiles = [];
+    document.getElementById('edit-doc-urls').value = JSON.stringify(editExistingUrls);
+    renderAllPreviews(true, 'edit-preview-grid');
+    
+    // Set up the edit upload zone dynamically when modal opens
+    setupUploadZone('edit-upload-zone', 'edit-file-input', 'edit-preview-grid', true);
+
     const start12 = convert24to12(start);
     document.getElementById('edit-start').value = start12.time;
     document.getElementById('edit-start-ampm').value = start12.ampm;
@@ -530,7 +875,49 @@ const formatTo24hr = (timeStr: string) => {
     }
 
     try {
+      const isEdit = form.classList.contains('edit-form');
+      const isAdd = form.classList.contains('side-form');
+      
+      let uploadedUrls = [];
+      if (isAdd || isEdit) {
+        const localFiles = isEdit ? editSelectedFiles : addSelectedFiles;
+        if (localFiles.length > 0) {
+          const originalText = btn.innerHTML;
+          btn.innerHTML = `
+            <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" style="display:inline-block; vertical-align:middle; width:16px; height:16px; animation: spin 1s linear infinite; margin-right: 8px;">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" style="opacity: 0.25;"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" style="opacity: 0.75;"></path>
+            </svg>
+            UPLOADING PROOF...
+          `;
+
+          const uploadFormData = new FormData();
+          localFiles.forEach(file => {
+            uploadFormData.append('files', file);
+          });
+
+          const uploadRes = await fetch('/api/upload', {
+            method: 'POST',
+            body: uploadFormData
+          });
+
+          if (!uploadRes.ok) {
+            const errorObj = await uploadRes.json();
+            throw new Error(errorObj.error || 'Failed to upload documentation');
+          }
+
+          uploadedUrls = await uploadRes.json();
+          btn.innerHTML = originalText;
+        }
+      }
+
       const formData = new FormData(form);
+      
+      if (isAdd || isEdit) {
+        const existingUrls = isEdit ? editExistingUrls : [];
+        const finalUrls = [...existingUrls, ...uploadedUrls];
+        formData.set('documentationUrls', JSON.stringify(finalUrls));
+      }
       
       // If a specific submit button triggered the submission, append its action values
       if (event && event.submitter) {
@@ -540,7 +927,7 @@ const formatTo24hr = (timeStr: string) => {
         }
       }
 
-      const response = await fetch(window.location.pathname, {
+      const response = await fetch(window.location.pathname + window.location.search, {
         method: 'POST',
         body: formData
       });
@@ -584,6 +971,11 @@ const formatTo24hr = (timeStr: string) => {
       // 4. Reset manual add form (if this was the one submitted)
       if (form.classList.contains('side-form')) {
         form.reset();
+        addSelectedFiles = [];
+        const addPreview = document.getElementById('add-preview-grid');
+        if (addPreview) addPreview.innerHTML = '';
+        setupUploadZone('add-upload-zone', 'add-file-input', 'add-preview-grid', false);
+
         const dateInput = form.querySelector('input[type="date"]');
         if (dateInput) {
           dateInput.value = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
@@ -793,9 +1185,188 @@ const formatTo24hr = (timeStr: string) => {
     border-bottom: none; padding: 16px 20px; display: flex; justify-content: space-between; align-items: center;
     transition: background .15s;
   }
-  .log-card:first-child { border-radius: 12px 12px 0 0; }
-  .log-card:last-child { border-radius: 0 0 12px 12px; border-bottom: 1px solid var(--border-subtle); }
-  .log-card:hover { background: rgba(237, 102, 33, 0.04); }
+  /* Date Grouping Card & Shifts */
+  .date-group-card {
+    background: rgba(5, 11, 22, 0.6);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    margin-bottom: 16px;
+    overflow: hidden;
+    transition: border-color 0.2s;
+  }
+  .date-group-card:last-child {
+    margin-bottom: 0;
+  }
+  .date-group-card:hover {
+    border-color: rgba(237, 102, 33, 0.2);
+  }
+  .date-group-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.02);
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .date-group-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: white;
+  }
+  .date-group-hours {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--ntv-orange);
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .shift-list {
+    display: flex;
+    flex-direction: column;
+  }
+  .shift-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 20px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    transition: background-color 0.15s;
+  }
+  .shift-item:last-child {
+    border-bottom: none;
+  }
+  .shift-item:hover {
+    background: rgba(237, 102, 33, 0.03);
+  }
+  .shift-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: white;
+    display: block;
+    margin-bottom: 4px;
+  }
+  .shift-sub {
+    font-size: 11px;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .shift-actions {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+  .shift-hours {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--ntv-orange);
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  /* Month Grouping & Headers */
+  .month-group {
+    margin-bottom: 28px;
+  }
+  .month-group:last-child {
+    margin-bottom: 0;
+  }
+  .month-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    margin-bottom: 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  }
+  .month-name {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .month-hours {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--ntv-orange);
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  /* History Header & Date Filters */
+  .history-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    gap: 16px;
+  }
+  .history-header .column-title {
+    margin-bottom: 0;
+  }
+  .date-filters {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .date-input-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(13, 20, 33, 0.4);
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    padding: 6px 10px;
+    transition: border-color 0.2s, background-color 0.2s;
+  }
+  .date-input-group:focus-within {
+    border-color: var(--ntv-orange);
+    background: rgba(237, 102, 33, 0.04);
+  }
+  .date-input-group label {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    user-select: none;
+  }
+  .filter-date-input {
+    background: transparent;
+    border: none;
+    color: white;
+    font-size: 12px;
+    outline: none;
+    font-family: 'Outfit', sans-serif;
+    cursor: pointer;
+  }
+  .filter-date-input::-webkit-calendar-picker-indicator {
+    filter: invert(1) sepia(100%) saturate(1000%) hue-rotate(340deg);
+    cursor: pointer;
+    opacity: 0.8;
+  }
+  .filter-date-input::-webkit-calendar-picker-indicator:hover {
+    opacity: 1;
+  }
+  .btn-clear-filter {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+    color: #f87171;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 7px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .btn-clear-filter:hover {
+    background: #ef4444;
+    border-color: transparent;
+    color: white;
+  }
   
   .log-title { font-size: 14px; font-weight: 600; color: white; display: block; margin-bottom: 4px; }
   .log-sub { font-size: 11px; color: var(--text-secondary); display: flex; align-items: center; gap: 8px; font-family: 'JetBrains Mono', monospace; }
@@ -885,8 +1456,11 @@ const formatTo24hr = (timeStr: string) => {
     .btn-primary { width: 100%; justify-content: center; }
     .main-control { padding: 20px; }
     .live-digits { font-size: 24px; }
-    .log-card { flex-direction: column; align-items: flex-start; gap: 16px; }
-    .log-actions { width: 100%; justify-content: space-between; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 12px; }
+    .shift-item { flex-direction: column; align-items: flex-start; gap: 16px; }
+    .shift-actions { width: 100%; justify-content: space-between; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 12px; }
+    .history-header { flex-direction: column; align-items: flex-start; gap: 12px; }
+    .date-filters { width: 100%; flex-wrap: wrap; }
+    .date-input-group { flex: 1; min-width: 120px; }
   }
 
   @media (max-width: 480px) {
@@ -959,5 +1533,160 @@ const formatTo24hr = (timeStr: string) => {
   }
   .notice-link:hover {
     color: #fff;
+  }
+
+  /* File Upload Zone */
+  .file-upload-zone {
+    border: 2px dashed var(--border-subtle);
+    border-radius: 10px;
+    padding: 20px;
+    text-align: center;
+    cursor: pointer;
+    background: rgba(255, 255, 255, 0.01);
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    margin-top: 6px;
+  }
+  .file-upload-zone:hover, .file-upload-zone.dragover {
+    border-color: var(--ntv-orange);
+    background: rgba(237, 102, 33, 0.04);
+  }
+  .file-upload-zone span {
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+  .upload-icon {
+    color: var(--text-secondary);
+    opacity: 0.6;
+    transition: color 0.2s, opacity 0.2s;
+  }
+  .file-upload-zone:hover .upload-icon {
+    color: var(--ntv-orange);
+    opacity: 1;
+  }
+  .hidden-file-input {
+    display: none;
+  }
+
+  /* Previews Grid */
+  :global(.preview-grid) {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+    gap: 8px;
+  }
+  :global(.preview-thumb-wrapper) {
+    position: relative;
+    width: 64px;
+    height: 64px;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--border-subtle);
+    background: #050b16;
+  }
+  :global(.preview-thumb) {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  :global(.preview-del-btn) {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: rgba(239, 68, 68, 0.9);
+    border: none;
+    color: white;
+    font-size: 11px;
+    font-weight: 800;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+    padding: 0;
+  }
+  :global(.preview-del-btn:hover) {
+    background: #ef4444;
+  }
+  :global(.preview-thumb-wrapper.local) {
+    border-color: rgba(237, 102, 33, 0.4);
+  }
+  :global(.preview-badge) {
+    position: absolute;
+    bottom: 2px;
+    left: 2px;
+    background: var(--ntv-orange);
+    color: white;
+    font-size: 7px;
+    font-weight: 800;
+    padding: 1px 3px;
+    border-radius: 3px;
+    letter-spacing: 0.05em;
+  }
+
+  /* Entry inline previews */
+  :global(.entry-doc-preview) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  :global(.doc-thumb-link) {
+    width: 36px;
+    height: 36px;
+    border-radius: 6px;
+    overflow: hidden;
+    border: 1px solid var(--border-subtle);
+    display: inline-block;
+    transition: transform 0.15s, border-color 0.15s;
+    background: #050b16;
+  }
+  :global(.doc-thumb-link:hover) {
+    transform: scale(1.08);
+    border-color: var(--ntv-orange);
+  }
+  :global(.doc-thumb) {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  :global(.doc-thumb-container) {
+    position: relative;
+    display: inline-block;
+  }
+  :global(.doc-download-btn) {
+    position: absolute;
+    bottom: -3px;
+    right: -3px;
+    background: var(--ntv-orange);
+    color: white;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #050b16;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.5);
+    cursor: pointer;
+    transition: transform 0.2s, background-color 0.2s;
+    z-index: 5;
+    text-decoration: none;
+  }
+  :global(.doc-download-btn:hover) {
+    transform: scale(1.2);
+    background: white;
+    color: var(--ntv-orange);
+  }
+
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
   }
 </style>

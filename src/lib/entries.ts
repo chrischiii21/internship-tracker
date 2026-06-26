@@ -10,6 +10,7 @@ export interface TimeEntry {
   durationSeconds: number;
   startFull: string; // ISO String
   endFull: string; // ISO String
+  documentationUrls: string[];
 }
 
 export async function getManualEntries(userId: string): Promise<TimeEntry[]> {
@@ -38,7 +39,8 @@ export async function getManualEntries(userId: string): Promise<TimeEntry[]> {
         endTime: timeStr(end),
         durationSeconds: e.duration_seconds,
         startFull: e.start_time,
-        endFull: e.end_time
+        endFull: e.end_time,
+        documentationUrls: e.documentation_urls || []
       };
     });
   } catch (e) {
@@ -47,7 +49,7 @@ export async function getManualEntries(userId: string): Promise<TimeEntry[]> {
   }
 }
 
-export async function addManualEntry(entry: { userId: string, description: string, date: string, startTime: string, endTime: string }) {
+export async function addManualEntry(entry: { userId: string, description: string, date: string, startTime: string, endTime: string, documentationUrls?: string[] }) {
   // Combine date and time to create full timestamps in Philippine Time
   const ensureSeconds = (t: string) => t.split(':').length === 2 ? `${t}:00` : t;
   const startStr = `${entry.date}T${ensureSeconds(entry.startTime)}+08:00`;
@@ -68,7 +70,8 @@ export async function addManualEntry(entry: { userId: string, description: strin
       description: entry.description,
       start_time: start.toISOString(),
       end_time: end.toISOString(),
-      duration_seconds: durationSeconds
+      duration_seconds: durationSeconds,
+      documentation_urls: entry.documentationUrls || []
     })
     .select()
     .single();
@@ -77,7 +80,7 @@ export async function addManualEntry(entry: { userId: string, description: strin
   return data;
 }
 
-export async function updateManualEntry(id: string, entry: { description: string, date: string, startTime: string, endTime: string }) {
+export async function updateManualEntry(id: string, entry: { description: string, date: string, startTime: string, endTime: string, documentationUrls?: string[] }) {
   const ensureSeconds = (t: string) => t.split(':').length === 2 ? `${t}:00` : t;
   const startStr = `${entry.date}T${ensureSeconds(entry.startTime)}+08:00`;
   const endStr = `${entry.date}T${ensureSeconds(entry.endTime)}+08:00`;
@@ -95,7 +98,8 @@ export async function updateManualEntry(id: string, entry: { description: string
       description: entry.description,
       start_time: start.toISOString(),
       end_time: end.toISOString(),
-      duration_seconds: durationSeconds
+      duration_seconds: durationSeconds,
+      documentation_urls: entry.documentationUrls || []
     })
     .eq('id', id)
     .select()
