@@ -151,6 +151,34 @@ const sortedEntries = [...filteredEntries].sort((a, b) => {
   return b.startTime.localeCompare(a.startTime);
 });
 
+const getWeekRangeLabel = (dateStr: string) => {
+  const dateObj = new Date(dateStr + 'T00:00:00+08:00');
+  const day = dateObj.getDay(); // 0 = Sunday, 1 = Monday, ... 6 = Saturday
+  
+  // Calculate Monday of the week
+  const monday = new Date(dateObj);
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+  monday.setDate(dateObj.getDate() + diffToMonday);
+  
+  // Calculate Sunday of the week
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  
+  const options: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', timeZone: 'Asia/Manila' };
+  const startStr = monday.toLocaleDateString('en-US', options);
+  const endStr = sunday.toLocaleDateString('en-US', options);
+  
+  const yyyy = monday.getFullYear();
+  const mm = String(monday.getMonth() + 1).padStart(2, '0');
+  const dd = String(monday.getDate()).padStart(2, '0');
+  const key = `${yyyy}-${mm}-${dd}`;
+  
+  return {
+    key,
+    label: `Week of ${startStr} – ${endStr}, ${yyyy}`
+  };
+};
+
 interface DateGroup {
   dateKey: string;
   dateDisplay: string;
@@ -158,11 +186,18 @@ interface DateGroup {
   entries: typeof entries;
 }
 
+interface WeekGroup {
+  weekKey: string;
+  weekDisplay: string;
+  totalSeconds: number;
+  dateGroups: DateGroup[];
+}
+
 interface MonthGroup {
   monthKey: string; // YYYY-MM
   monthName: string;
   totalSeconds: number;
-  dateGroups: DateGroup[];
+  weekGroups: WeekGroup[];
 }
 
 const monthsMap = new Map<string, MonthGroup>();
@@ -170,6 +205,7 @@ const monthsMap = new Map<string, MonthGroup>();
 for (const entry of sortedEntries) {
   const monthKey = entry.date.substring(0, 7); // "YYYY-MM"
   const dateKey = entry.date; // "YYYY-MM-DD"
+  const { key: weekKey, label: weekDisplay } = getWeekRangeLabel(entry.date);
 
   // 1. Resolve Month Group
   if (!monthsMap.has(monthKey)) {
@@ -183,15 +219,28 @@ for (const entry of sortedEntries) {
       monthKey,
       monthName,
       totalSeconds: 0,
-      dateGroups: []
+      weekGroups: []
     });
   }
 
   const monthGroup = monthsMap.get(monthKey)!;
   monthGroup.totalSeconds += entry.durationSeconds;
 
-  // 2. Resolve Date Group within Month
-  let dateGroup = monthGroup.dateGroups.find(dg => dg.dateKey === dateKey);
+  // 2. Resolve Week Group within Month
+  let weekGroup = monthGroup.weekGroups.find(wg => wg.weekKey === weekKey);
+  if (!weekGroup) {
+    weekGroup = {
+      weekKey,
+      weekDisplay,
+      totalSeconds: 0,
+      dateGroups: []
+    };
+    monthGroup.weekGroups.push(weekGroup);
+  }
+  weekGroup.totalSeconds += entry.durationSeconds;
+
+  // 3. Resolve Date Group within Week
+  let dateGroup = weekGroup.dateGroups.find(dg => dg.dateKey === dateKey);
   if (!dateGroup) {
     const dateObj = new Date(entry.date + 'T00:00:00+08:00');
     const options: Intl.DateTimeFormatOptions = { 
@@ -208,7 +257,7 @@ for (const entry of sortedEntries) {
       totalSeconds: 0,
       entries: []
     };
-    monthGroup.dateGroups.push(dateGroup);
+    weekGroup.dateGroups.push(dateGroup);
   }
 
   dateGroup.entries.push(entry);
@@ -216,6 +265,13 @@ for (const entry of sortedEntries) {
 }
 
 const groupedEntries = Array.from(monthsMap.values()).sort((a, b) => b.monthKey.localeCompare(a.monthKey));
+
+groupedEntries.forEach(monthGroup => {
+  monthGroup.weekGroups.sort((a, b) => b.weekKey.localeCompare(a.weekKey));
+  monthGroup.weekGroups.forEach(weekGroup => {
+    weekGroup.dateGroups.sort((a, b) => b.dateKey.localeCompare(a.dateKey));
+  });
+});
 
 const formatTo24hr = (timeStr: string) => {
   if (!timeStr) return '';
@@ -362,56 +418,110 @@ const formatTo24hr = (timeStr: string) => {
                     <div class="month-group">
                       <div class="month-header">
                         <span class="month-name">{group.monthName}</span>
-                        <span class="month-hours">{formatHours(group.totalSeconds / 3600)}</span>
+                        <div class="month-header-right">
+                          <span class="month-hours">{formatHours(group.totalSeconds / 3600)}</span>
+                          <button
+                            type="button"
+                            class="ai-summary-trigger ai-btn-monthly"
+                            title="Generate Monthly AI Journal Summary"
+                            data-type="month"
+                            data-label={group.monthName}
+                            data-entries={JSON.stringify(group.weekGroups.flatMap(wg => wg.dateGroups.flatMap(dg => dg.entries.map(e => ({ date: e.date, description: e.description, durationSeconds: e.durationSeconds })))))}
+                          >
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                              <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
+                            </svg>
+                            AI Summary
+                          </button>
+                        </div>
                       </div>
-                      <div class="month-dates">
-                        {group.dateGroups.map(dateGroup => (
-                          <div class="date-group-card">
-                            <div class="date-group-header">
-                              <span class="date-group-title">{dateGroup.dateDisplay}</span>
-                              <span class="date-group-hours">{formatHours(dateGroup.totalSeconds / 3600)}</span>
+                      <div class="month-weeks">
+                        {group.weekGroups.map(weekGroup => (
+                          <div class="week-group">
+                            <div class="week-header">
+                              <span class="week-name">{weekGroup.weekDisplay}</span>
+                              <div class="week-header-right">
+                                <span class="week-hours">{formatHours(weekGroup.totalSeconds / 3600)}</span>
+                                <button
+                                  type="button"
+                                  class="ai-summary-trigger ai-btn-weekly"
+                                  title="Generate Weekly AI Journal Summary"
+                                  data-type="week"
+                                  data-label={weekGroup.weekDisplay}
+                                  data-entries={JSON.stringify(weekGroup.dateGroups.flatMap(dg => dg.entries.map(e => ({ date: e.date, description: e.description, durationSeconds: e.durationSeconds }))))}
+                                >
+                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
+                                  </svg>
+                                  AI Summary
+                                </button>
+                              </div>
                             </div>
-                            <div class="shift-list">
-                              {dateGroup.entries.map(entry => (
-                                <div class="shift-item">
-                                  <div class="shift-info">
-                                    <span class="shift-title">{entry.description || 'General Work'}</span>
-                                    <div class="shift-sub">
-                                      <span class="time">{formatTo24hr(entry.startTime)} — {formatTo24hr(entry.endTime)}</span>
-                                    </div>
-                                    {entry.documentationUrls && entry.documentationUrls.length > 0 && (
-                                      <div class="entry-doc-preview">
-                                        {entry.documentationUrls.map(url => (
-                                          <div class="doc-thumb-container">
-                                            <a href={url} target="_blank" class="doc-thumb-link" title="View documentation">
-                                              <img src={url} alt="Proof" class="doc-thumb" />
-                                            </a>
-                                            <a href={`/api/download?url=${encodeURIComponent(url)}`} class="doc-download-btn" title="Download proof">
-                                              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                                            </a>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    )}
-                                  </div>
-                                  <div class="shift-actions">
-                                    <span class="shift-hours">{formatHours(entry.durationSeconds / 3600)}</span>
-                                    <div class="action-group">
-                                      <button 
-                                        class="edit-icon" 
-                                        title="Edit Entry"
-                                        onclick={`window.openEditModal('${entry.id}', '${entry.description.replace(/'/g, "\\'")}', '${entry.date}', '${entry.startTime}', '${entry.endTime}', ${JSON.stringify(entry.documentationUrls)})`}
-                                      >
-                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                                      </button>
-                                      <button 
+                            <div class="week-dates">
+                              {weekGroup.dateGroups.map(dateGroup => (
+                                <div class="date-group-card">
+                                  <div class="date-group-header">
+                                    <span class="date-group-title">{dateGroup.dateDisplay}</span>
+                                    <div class="date-group-header-right">
+                                      <span class="date-group-hours">{formatHours(dateGroup.totalSeconds / 3600)}</span>
+                                      <button
                                         type="button"
-                                        class="delete-icon" 
-                                        onclick={`window.openDeleteModal('${entry.id}')`}
+                                        class="ai-summary-trigger ai-btn-daily"
+                                        title="Generate Daily AI Journal Summary"
+                                        data-type="day"
+                                        data-label={dateGroup.dateDisplay}
+                                        data-entries={JSON.stringify(dateGroup.entries.map(e => ({ date: e.date, description: e.description, durationSeconds: e.durationSeconds })))}
                                       >
-                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                          <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
+                                        </svg>
                                       </button>
                                     </div>
+                                  </div>
+                                  <div class="shift-list">
+                                    {dateGroup.entries.map(entry => (
+                                      <div class="shift-item">
+                                        <div class="shift-info">
+                                          <span class="shift-title">{entry.description || 'General Work'}</span>
+                                          <div class="shift-sub">
+                                            <span class="time">{formatTo24hr(entry.startTime)} — {formatTo24hr(entry.endTime)}</span>
+                                          </div>
+                                          {entry.documentationUrls && entry.documentationUrls.length > 0 && (
+                                            <div class="entry-doc-preview">
+                                              {entry.documentationUrls.map(url => (
+                                                <div class="doc-thumb-container">
+                                                  <a href={url} target="_blank" class="doc-thumb-link" title="View documentation">
+                                                    <img src={url} alt="Proof" class="doc-thumb" />
+                                                  </a>
+                                                  <a href={`/api/download?url=${encodeURIComponent(url)}`} class="doc-download-btn" title="Download proof">
+                                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                                  </a>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          )}
+                                        </div>
+                                        <div class="shift-actions">
+                                          <span class="shift-hours">{formatHours(entry.durationSeconds / 3600)}</span>
+                                          <div class="action-group">
+                                            <button 
+                                              class="edit-icon" 
+                                              title="Edit Entry"
+                                              onclick={`window.openEditModal('${entry.id}', '${entry.description.replace(/'/g, "\\'")}', '${entry.date}', '${entry.startTime}', '${entry.endTime}', ${JSON.stringify(entry.documentationUrls)})`}
+                                            >
+                                              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                                            </button>
+                                            <button 
+                                              type="button"
+                                              class="delete-icon" 
+                                              onclick={`window.openDeleteModal('${entry.id}')`}
+                                            >
+                                              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                            </button>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    ))}
                                   </div>
                                 </div>
                               ))}
@@ -559,6 +669,45 @@ const formatTo24hr = (timeStr: string) => {
           <div class="modal-actions-stacked">
             <button type="button" class="btn-confirm-delete" onclick="window.confirmDelete()">Yes, Delete Log</button>
             <button type="button" class="btn-cancel" onclick="document.getElementById('delete-log-modal').style.display='none'">Cancel</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- AI Summary Modal -->
+      <div id="ai-summary-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content glassmorphic-ai">
+          <div class="modal-header">
+            <div class="ai-header-title">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="ai-sparkle-glowing">
+                <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
+                <path d="m5 3 1 2.5L8.5 6 6 7 5 9.5 4 7 1.5 6 4 5.5z"/>
+              </svg>
+              <h3>AI Journal Entry Suggestion</h3>
+            </div>
+            <button class="close-btn" onclick="document.getElementById('ai-summary-modal').style.display='none'">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            </button>
+          </div>
+          <div class="ai-summary-body">
+            <div id="ai-summary-loading" class="ai-loading-container" style="display: none;">
+              <div class="ai-spinner"></div>
+              <p>Consulting internship AI mentor...</p>
+            </div>
+            <div id="ai-summary-error" class="ai-error-container" style="display: none;">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              <p id="ai-summary-error-text"></p>
+            </div>
+            <div id="ai-summary-result-container" class="ai-result-container" style="display: none;">
+              <textarea id="ai-summary-text" class="ai-textarea" readonly></textarea>
+              <p class="ai-hint">This summary was generated to match your journal entry requirement. Feel free to copy and edit it as needed.</p>
+            </div>
+          </div>
+          <div class="modal-actions mt-16">
+            <button type="button" class="btn-cancel" onclick="document.getElementById('ai-summary-modal').style.display='none'">Close</button>
+            <button type="button" id="btn-copy-ai-summary" class="btn-save" style="display: none;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              Copy Suggestion
+            </button>
           </div>
         </div>
       </div>
@@ -959,6 +1108,7 @@ const formatTo24hr = (timeStr: string) => {
       const oldLogList = document.querySelector('.log-list');
       if (newLogList && oldLogList) {
         oldLogList.replaceWith(newLogList);
+        setupAiTriggers();
       }
 
       // 3. Swap stats box
@@ -1115,6 +1265,95 @@ const formatTo24hr = (timeStr: string) => {
       }
     }
   });
+
+  // AI Summary Logic
+  const aiModal = document.getElementById('ai-summary-modal');
+  const aiLoading = document.getElementById('ai-summary-loading');
+  const aiError = document.getElementById('ai-summary-error');
+  const aiErrorText = document.getElementById('ai-summary-error-text');
+  const aiResultContainer = document.getElementById('ai-summary-result-container');
+  const aiText = document.getElementById('ai-summary-text');
+  const btnCopyAi = document.getElementById('btn-copy-ai-summary');
+
+  async function handleAiSummaryClick(e) {
+    e.preventDefault();
+    const btn = e.currentTarget;
+    const type = btn.dataset.type;
+    const label = btn.dataset.label;
+    let entries = [];
+    try {
+      entries = JSON.parse(btn.dataset.entries || '[]');
+    } catch (err) {
+      console.error('Failed to parse entries JSON:', err);
+      return;
+    }
+
+    if (!aiModal || !aiLoading || !aiError || !aiResultContainer || !aiText || !btnCopyAi) return;
+
+    // Reset and show modal
+    aiModal.style.display = 'flex';
+    aiLoading.style.display = 'flex';
+    aiError.style.display = 'none';
+    aiResultContainer.style.display = 'none';
+    btnCopyAi.style.display = 'none';
+
+    try {
+      const response = await fetch('/api/summarize', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ type, label, entries })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to generate summary.');
+      }
+
+      // Success
+      aiLoading.style.display = 'none';
+      aiResultContainer.style.display = 'block';
+      aiText.value = data.text;
+      btnCopyAi.style.display = 'inline-flex';
+    } catch (err) {
+      // Error
+      aiLoading.style.display = 'none';
+      aiError.style.display = 'flex';
+      aiErrorText.textContent = err.message || 'An unexpected error occurred.';
+    }
+  }
+
+  // Setup click listeners for all AI Summary trigger buttons
+  function setupAiTriggers() {
+    document.querySelectorAll('.ai-summary-trigger').forEach(btn => {
+      btn.removeEventListener('click', handleAiSummaryClick);
+      btn.addEventListener('click', handleAiSummaryClick);
+    });
+  }
+
+  // Setup immediately
+  setupAiTriggers();
+
+  // Copy to clipboard
+  if (btnCopyAi && aiText) {
+    btnCopyAi.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(aiText.value);
+        const originalHTML = btnCopyAi.innerHTML;
+        btnCopyAi.innerHTML = `
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;"><polyline points="20 6 9 17 4 12"/></svg>
+          Copied!
+        `;
+        setTimeout(() => {
+          btnCopyAi.innerHTML = originalHTML;
+        }, 2000);
+      } catch (err) {
+        window.showToast('Failed to copy text', 'error');
+      }
+    });
+  }
 </script>
 
 <style>
@@ -1291,6 +1530,220 @@ const formatTo24hr = (timeStr: string) => {
     font-weight: 700;
     color: var(--ntv-orange);
     font-family: 'JetBrains Mono', monospace;
+  }
+
+  /* Week Grouping & Headers */
+  .month-weeks {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .week-group {
+    background: rgba(255, 255, 255, 0.01);
+    border: 1px dashed rgba(255, 255, 255, 0.06);
+    border-radius: 14px;
+    padding: 16px;
+  }
+  .week-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 12px;
+    margin-bottom: 14px;
+    border-bottom: 1px dashed rgba(255, 255, 255, 0.06);
+  }
+  .week-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .week-name::before {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: var(--ntv-orange);
+    opacity: 0.8;
+  }
+  .week-hours {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .week-dates {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .week-dates .date-group-card {
+    margin-bottom: 0;
+  }
+
+  /* Month/Week Header Flex Alignments */
+  .month-header-right, .week-header-right, .date-group-header-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  /* AI Summary Trigger Buttons */
+  .ai-summary-trigger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    background: rgba(237, 102, 33, 0.06);
+    border: 1px solid rgba(237, 102, 33, 0.15);
+    border-radius: 6px;
+    color: var(--ntv-orange);
+    cursor: pointer;
+    font-family: 'Outfit', sans-serif;
+    font-weight: 600;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .ai-summary-trigger:hover {
+    background: rgba(237, 102, 33, 0.15);
+    border-color: rgba(237, 102, 33, 0.4);
+    transform: translateY(-1px);
+    box-shadow: 0 0 12px rgba(237, 102, 33, 0.1);
+  }
+  .ai-summary-trigger:active {
+    transform: translateY(0);
+  }
+  
+  .ai-btn-monthly, .ai-btn-weekly {
+    padding: 4px 10px;
+    font-size: 11px;
+  }
+
+  .ai-btn-daily {
+    padding: 0;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    color: var(--text-secondary);
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+  }
+  .ai-btn-daily:hover {
+    color: var(--ntv-orange);
+    background: rgba(237, 102, 33, 0.08);
+    border-color: rgba(237, 102, 33, 0.25);
+  }
+
+  /* AI Summary Modal Styling */
+  .glassmorphic-ai {
+    background: rgba(10, 18, 32, 0.85) !important;
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(237, 102, 33, 0.15) !important;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6), 0 0 40px rgba(237, 102, 33, 0.05) !important;
+  }
+  .ai-header-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .ai-header-title h3 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 700;
+    color: white;
+  }
+  .ai-sparkle-glowing {
+    color: var(--ntv-orange);
+    filter: drop-shadow(0 0 4px rgba(237, 102, 33, 0.6));
+    animation: pulseGlow 2s infinite ease-in-out;
+  }
+  @keyframes pulseGlow {
+    0%, 100% { filter: drop-shadow(0 0 2px rgba(237, 102, 33, 0.4)); opacity: 0.8; }
+    50% { filter: drop-shadow(0 0 8px rgba(237, 102, 33, 0.8)); opacity: 1; }
+  }
+
+  .ai-summary-body {
+    margin-top: 20px;
+    min-height: 120px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  /* Loading State */
+  .ai-loading-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    padding: 20px 0;
+  }
+  .ai-loading-container p {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin: 0;
+  }
+  .ai-spinner {
+    width: 32px;
+    height: 32px;
+    border: 3px solid rgba(237, 102, 33, 0.1);
+    border-top-color: var(--ntv-orange);
+    border-radius: 50%;
+    animation: aiSpin 1s infinite linear;
+  }
+  @keyframes aiSpin {
+    to { transform: rotate(360deg); }
+  }
+
+  /* Error State */
+  .ai-error-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    color: #ef4444;
+    text-align: center;
+    padding: 10px 0;
+  }
+  .ai-error-container p {
+    font-size: 13px;
+    margin: 0;
+    color: #f87171;
+  }
+
+  /* Textarea & Result State */
+  .ai-result-container {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .ai-textarea {
+    width: 100%;
+    height: 160px;
+    background: rgba(5, 11, 22, 0.5);
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    color: #e2e8f0;
+    padding: 14px;
+    font-size: 14px;
+    line-height: 1.6;
+    resize: none;
+    outline: none;
+    font-family: 'Outfit', sans-serif;
+    transition: border-color 0.2s;
+  }
+  .ai-textarea:focus {
+    border-color: rgba(237, 102, 33, 0.3);
+  }
+  .ai-hint {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin: 0;
   }
 
   /* History Header & Date Filters */
