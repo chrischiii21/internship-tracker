@@ -168,20 +168,39 @@ const needsUpdate =
             }
           </select>
         </div>
-        <button onclick="window.print()" class="print-btn">
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            ><path
-              d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"
-            ></path><rect x="6" y="14" width="12" height="8"></rect>
-          </svg>
-          Print / Download DTR
-        </button>
+        <div class="actions-group">
+          <button onclick="window.print()" class="print-btn">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              ><path
+                d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"
+              ></path><rect x="6" y="14" width="12" height="8"></rect>
+            </svg>
+            Print DTR
+          </button>
+          <button
+            id="download-pdf-btn"
+            class="download-btn"
+            data-filename={`DTR_${settings.userName?.replace(/\s+/g, "_") || "Student"}_${monthName}_${year}.pdf`}
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"></path>
+            </svg>
+            Download PDF
+          </button>
+        </div>
       </div>
 
       <div class="dtr-scroll-wrapper content-center">
@@ -290,7 +309,9 @@ const needsUpdate =
   </div>
 </Layout>
 
-<script is:inline>
+<script>
+  import html2pdf from 'html2pdf.js/dist/html2pdf.min.js';
+
   const sSel = document.getElementById("student-selector");
   const mSel = document.getElementById("month-selector");
   const ySel = document.getElementById("year-selector");
@@ -318,6 +339,47 @@ const needsUpdate =
     const newUrl = window.location.pathname;
     window.history.replaceState({}, '', newUrl);
   }
+
+  // PDF Download Handling
+  const downloadBtn = document.getElementById("download-pdf-btn");
+  downloadBtn?.addEventListener("click", () => {
+    if (window.showToast) {
+      window.showToast("Generating PDF, please wait...", "info");
+    }
+
+    const element = document.getElementById("dtr-sheet");
+    const filename = downloadBtn.getAttribute("data-filename") || "DTR_Sheet.pdf";
+
+    const opt = {
+      margin:       0,
+      filename:     filename,
+      image:        { type: 'jpeg', quality: 0.98 },
+      html2canvas:  { scale: 2, useCORS: true, logging: false },
+      jsPDF:        { unit: 'in', format: 'letter', orientation: 'portrait' }
+    };
+
+    if (html2pdf) {
+      html2pdf()
+        .set(opt)
+        .from(element)
+        .save()
+        .then(() => {
+          if (window.showToast) {
+            window.showToast("PDF downloaded successfully!", "success");
+          }
+        })
+        .catch((err) => {
+          console.error("PDF generation failed:", err);
+          if (window.showToast) {
+            window.showToast("Failed to generate PDF. Please try again.", "error");
+          }
+        });
+    } else {
+      if (window.showToast) {
+        window.showToast("PDF generator library is not loaded. Please try again.", "error");
+      }
+    }
+  });
 </script>
 
 <style>
@@ -398,7 +460,29 @@ const needsUpdate =
     background: #111827;
     color: white;
   }
+  .actions-group {
+    display: flex;
+    gap: 12px;
+  }
   .print-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-subtle);
+    color: white;
+    padding: 10px 18px;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: 0.2s;
+  }
+  .print-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.2);
+    transform: translateY(-1px);
+  }
+  .download-btn {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -411,7 +495,7 @@ const needsUpdate =
     cursor: pointer;
     transition: 0.2s;
   }
-  .print-btn:hover {
+  .download-btn:hover {
     filter: brightness(1.1);
     transform: translateY(-1px);
   }

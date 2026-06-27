@@ -546,7 +546,8 @@ const isLinked = settings.role === 'student' && !!settings.coordinatorId;
   .input-wrapper input:has(+ .input-suffix) { padding-right: 48px; }
 
   .check-label { display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 13px; color: var(--text-primary); }
-  .settings-select { width: 100%; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 12px 14px; color: #fff; font-size: 14px; }
+  .settings-select { width: 100%; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 12px 14px; color: #fff; font-size: 14px; outline: none; }
+  .settings-select option { background: #0d1421; color: #fff; }
   
   .save-btn { align-self: flex-start; padding: 12px 24px; background: var(--ntv-gradient); color: white; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
   

@@ -4,8 +4,8 @@ import Header from '../components/Header.astro';
 import Sidebar from '../components/Sidebar.astro';
 import { getSession } from '../lib/auth';
 import { parse } from 'cookie';
-import { getManualEntries, addManualEntry, deleteManualEntry, updateManualEntry, getActiveTimer, startTimer, stopTimer, updateTimerStart } from '../lib/entries';
-import { getClockifyUser } from '../lib/clockify';
+import { getManualEntries, addManualEntry, deleteManualEntry, updateManualEntry } from '../lib/entries';
+import { getClockifyUser, getClockifyDetailedEntries } from '../lib/clockify';
 
 import { getAppSettings } from '../lib/settings';
 import { formatHours, formatHMS } from '../lib/utils';
@@ -20,11 +20,15 @@ const settings = await getAppSettings(user.id);
 if (settings.role === 'coordinator') return Astro.redirect('/coordinator');
 
 let userInClockify = false;
+let clockifyEntries: any[] = [];
 if (settings.clockifyEnabled !== false) {
   try {
     if (import.meta.env.CLOCKIFY_API_KEY) {
       const clockifyUser = await getClockifyUser(user.email);
-      userInClockify = !!clockifyUser;
+      if (clockifyUser) {
+        userInClockify = true;
+        clockifyEntries = await getClockifyDetailedEntries(clockifyUser.id, settings.startDate);
+      }
     }
   } catch (e) {
     userInClockify = false;
@@ -48,31 +52,9 @@ if (Astro.request.method === 'POST') {
   const formData = await Astro.request.formData();
   const action = formData.get('action');
 
-  if (action === 'start-timer' && !userInClockify) {
-    const desc = formData.get('description') as string;
-    await startTimer(user.id, desc);
-    return Astro.redirect('/tracker?success=Timer started');
-  }
 
-  if (action === 'update-start' && !userInClockify) {
-    const newStart = formData.get('startTime') as string;
-    await updateTimerStart(user.id, newStart);
-    return Astro.redirect('/tracker?success=Start time updated');
-  }
 
-  if (action === 'stop-timer' && !userInClockify) {
-    const desc = formData.get('description') as string;
-    try {
-      await stopTimer(user.id, desc);
-      const { addSyncLog } = await import('../lib/logs');
-      await addSyncLog({ userId: user.id, type: 'Sync', status: 'Success', details: `Timer stopped: ${desc || 'No description'}` });
-      return Astro.redirect('/tracker?success=Activity log saved');
-    } catch (e) {
-      return Astro.redirect(`/tracker?error=${encodeURIComponent(e.message)}`);
-    }
-  }
-
-  if (action === 'add' && !userInClockify) {
+  if (action === 'add') {
     const description = formData.get('description') as string;
     const date = formData.get('date') as string;
     const startTimeRaw = formData.get('startTime') as string;
@@ -95,7 +77,7 @@ if (Astro.request.method === 'POST') {
     }
   }
 
-  if (action === 'edit' && !userInClockify) {
+  if (action === 'edit') {
     const id = formData.get('id') as string;
     const description = formData.get('description') as string;
     const date = formData.get('date') as string;
@@ -128,18 +110,29 @@ if (Astro.request.method === 'POST') {
   }
 }
 
-const entries = await getManualEntries(user.id);
-const activeTimer = await getActiveTimer(user.id);
+const manualEntries = await getManualEntries(user.id);
 
 const startDateParam = Astro.url.searchParams.get('startDate') || '';
 const endDateParam = Astro.url.searchParams.get('endDate') || '';
+const sourceParam = Astro.url.searchParams.get('source') || 'all';
 
-let filteredEntries = entries;
+// Merge manual entries and Clockify entries
+const allEntries = [
+  ...manualEntries.map(e => ({ ...e, type: 'manual' as const })),
+  ...clockifyEntries.map(e => ({ ...e, type: 'clockify' as const }))
+];
+
+let filteredEntries = allEntries;
 if (startDateParam) {
   filteredEntries = filteredEntries.filter(e => e.date >= startDateParam);
 }
 if (endDateParam) {
   filteredEntries = filteredEntries.filter(e => e.date <= endDateParam);
+}
+if (sourceParam === 'manual') {
+  filteredEntries = filteredEntries.filter(e => e.type === 'manual');
+} else if (sourceParam === 'clockify') {
+  filteredEntries = filteredEntries.filter(e => e.type === 'clockify');
 }
 
 const totalSeconds = filteredEntries.reduce((acc, e) => acc + e.durationSeconds, 0);
@@ -150,6 +143,17 @@ const sortedEntries = [...filteredEntries].sort((a, b) => {
   if (dateCompare !== 0) return dateCompare;
   return b.startTime.localeCompare(a.startTime);
 });
+
+// Pagination setup
+const pageSize = 15;
+const pageParam = parseInt(Astro.url.searchParams.get('page') || '1', 10);
+const totalEntriesCount = sortedEntries.length;
+const totalPages = Math.ceil(totalEntriesCount / pageSize);
+const currentPage = Math.max(1, Math.min(pageParam, totalPages || 1));
+
+const paginatedEntries = totalEntriesCount > 0
+  ? sortedEntries.slice((currentPage - 1) * pageSize, currentPage * pageSize)
+  : [];
 
 const getWeekRangeLabel = (dateStr: string) => {
   const dateObj = new Date(dateStr + 'T00:00:00+08:00');
@@ -183,7 +187,7 @@ interface DateGroup {
   dateKey: string;
   dateDisplay: string;
   totalSeconds: number;
-  entries: typeof entries;
+  entries: typeof allEntries;
 }
 
 interface WeekGroup {
@@ -202,7 +206,7 @@ interface MonthGroup {
 
 const monthsMap = new Map<string, MonthGroup>();
 
-for (const entry of sortedEntries) {
+for (const entry of paginatedEntries) {
   const monthKey = entry.date.substring(0, 7); // "YYYY-MM"
   const dateKey = entry.date; // "YYYY-MM-DD"
   const { key: weekKey, label: weekDisplay } = getWeekRangeLabel(entry.date);
@@ -294,26 +298,18 @@ const formatTo24hr = (timeStr: string) => {
           <p>Precision internship logging with professional progress tracking.</p>
         </div>
 
-        {userInClockify ? (
-          <div class="sync-status-card">
-            <div class="sync-icon-wrapper">
-              <div class="sync-glow"></div>
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21 12a9 9 0 0 1-9 9m9-9a9 9 0 0 0-9-9m9 9H3m9 9a9 9 0 0 1-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"/>
-              </svg>
-            </div>
-            <div class="sync-content">
-              <div class="sync-badge">SYSTEM CLOUD SYNC</div>
-              <h3>External Workspace Active</h3>
-              <p>Manual tracking is currently locked because your session is being synchronized with the official Clockify workspace. This ensures 100% data integrity for your internship records.</p>
-              <div class="sync-meta">
-                <span class="pulse-dot green"></span>
-                <span>Real-time synchronization active</span>
-              </div>
-            </div>
-          </div>
-        ) : (
           <div class="tracker-layout">
+            {userInClockify && (
+              <div class="sync-mode-notice">
+                <div class="notice-icon">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 0 1-9 9m9-9a9 9 0 0 0-9-9m9 9H3m9 9a9 9 0 0 1-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"/></svg>
+                </div>
+                <div class="notice-text">
+                  <strong>Clockify Sync Active:</strong> Your logs are synchronized in real-time. Manual entries can still be logged locally to supplement your records.
+                </div>
+              </div>
+            )}
+
             {settings.clockifyEnabled === false && (
               <div class="manual-mode-notice">
                 <div class="notice-icon">
@@ -325,91 +321,68 @@ const formatTo24hr = (timeStr: string) => {
               </div>
             )}
             
-            <!-- Main Timer Section -->
-            <section class={`main-control ${activeTimer ? 'timer-active' : ''}`} data-start={activeTimer?.startTime}>
-              <form method="POST" class="control-form" id="timer-main-form">
-                <div class="task-input-wrapper">
-                  <label class="field-label">CURRENT TASK</label>
-                  <input 
-                    type="text" 
-                    name="description" 
-                    placeholder="Enter what you are working on..." 
-                    value={activeTimer?.description || ''} 
-                    autocomplete="off"
-                    class="main-task-input"
-                  />
-                </div>
-                
-                <div class="time-display-wrapper">
-                  {activeTimer && (
-                    <div class="edit-start-box">
-                      <label class="field-label">STARTED AT</label>
-                      <input 
-                        class="inline-time-input time-mask"
-                        maxlength="5"
-                        value={new Date(activeTimer.startTime).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Manila' })} 
-                        onchange="document.getElementById('action-hidden').value='update-start'; if (typeof this.form.requestSubmit === 'function') { this.form.requestSubmit(); } else { this.form.submit(); }"
-                      />
-                    </div>
-                  )}
-                  
-                  <div class="elapsed-box">
-                    <label class="field-label">RENDERED TIME</label>
-                    <span id="live-timer-val" class="live-digits">00:00:00</span>
-                  </div>
 
-                  <input type="hidden" name="action" id="action-hidden" value={activeTimer ? "stop-timer" : "start-timer"} />
-                  <input type="hidden" name="id" id="id-hidden" />
-
-                  <div class="button-box">
-                    {activeTimer ? (
-                      <button type="submit" onclick="document.getElementById('action-hidden').value='stop-timer'" class="btn-primary stop">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
-                        STOP TASK
-                      </button>
-                    ) : (
-                      <button type="submit" onclick="document.getElementById('action-hidden').value='start-timer'" class="btn-primary start">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M5 3l14 9-14 9V3z"/></svg>
-                        START TIMER
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </form>
-            </section>
 
             <!-- Metrics & History Grid -->
             <div class="content-grid">
               <!-- Left: History -->
               <div class="history-column">
                 <div class="history-header">
-                  <h2 class="column-title">Activity Logs</h2>
+                  <div class="history-header-top">
+                    <h2 class="column-title">Activity Logs</h2>
+                  </div>
                   
-                  <div class="date-filters">
-                    <div class="date-input-group">
-                      <label for="filter-start-date">From</label>
-                      <input 
-                        type="date" 
-                        id="filter-start-date" 
-                        value={startDateParam} 
-                        class="filter-date-input"
-                      />
-                    </div>
-                    <div class="date-input-group">
-                      <label for="filter-end-date">To</label>
-                      <input 
-                        type="date" 
-                        id="filter-end-date" 
-                        value={endDateParam} 
-                        class="filter-date-input"
-                      />
-                    </div>
-                    {(startDateParam || endDateParam) && (
-                      <button type="button" class="btn-clear-filter" id="btn-reset-filters" title="Clear Filters">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                        Clear
-                      </button>
+                  <div class="history-header-filters">
+                    {userInClockify && (
+                      <div class="source-filter-tabs">
+                        <button 
+                          class={`filter-tab ${sourceParam === 'all' ? 'active' : ''}`}
+                          onclick="window.setSourceFilter('all')"
+                        >
+                          All
+                        </button>
+                        <button 
+                          class={`filter-tab ${sourceParam === 'clockify' ? 'active' : ''}`}
+                          onclick="window.setSourceFilter('clockify')"
+                        >
+                          Clockify
+                        </button>
+                        <button 
+                          class={`filter-tab ${sourceParam === 'manual' ? 'active' : ''}`}
+                          onclick="window.setSourceFilter('manual')"
+                        >
+                          Manual
+                        </button>
+                      </div>
                     )}
+                    
+                    <div class="date-filters">
+                      <div class="date-input-group">
+                        <label for="filter-start-date">From</label>
+                        <input 
+                          type="date" 
+                          id="filter-start-date" 
+                          value={startDateParam} 
+                          class="filter-date-input"
+                        />
+                      </div>
+                      <div class="date-input-group">
+                        <label for="filter-end-date">To</label>
+                        <input 
+                          type="date" 
+                          id="filter-end-date" 
+                          value={endDateParam} 
+                          class="filter-date-input"
+                        />
+                      </div>
+                      <button type="button" class="btn-apply-filter" id="btn-apply-filters">Apply</button>
+                      {(startDateParam || endDateParam) && (
+                        <button type="button" class="btn-clear-filter" id="btn-reset-filters" title="Clear Filters">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                          Clear
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -482,7 +455,14 @@ const formatTo24hr = (timeStr: string) => {
                                     {dateGroup.entries.map(entry => (
                                       <div class="shift-item">
                                         <div class="shift-info">
-                                          <span class="shift-title">{entry.description || 'General Work'}</span>
+                                          <div class="shift-title-row">
+                                            <span class="shift-title">{entry.description || 'General Work'}</span>
+                                            {userInClockify && (
+                                              <span class={`source-badge ${entry.type}`}>
+                                                {entry.type === 'clockify' ? 'Clockify' : 'Manual'}
+                                              </span>
+                                            )}
+                                          </div>
                                           <div class="shift-sub">
                                             <span class="time">{formatTo24hr(entry.startTime)} — {formatTo24hr(entry.endTime)}</span>
                                           </div>
@@ -503,22 +483,30 @@ const formatTo24hr = (timeStr: string) => {
                                         </div>
                                         <div class="shift-actions">
                                           <span class="shift-hours">{formatHours(entry.durationSeconds / 3600)}</span>
-                                          <div class="action-group">
-                                            <button 
-                                              class="edit-icon" 
-                                              title="Edit Entry"
-                                              onclick={`window.openEditModal('${entry.id}', '${entry.description.replace(/'/g, "\\'")}', '${entry.date}', '${entry.startTime}', '${entry.endTime}', ${JSON.stringify(entry.documentationUrls)})`}
-                                            >
-                                              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                                            </button>
-                                            <button 
-                                              type="button"
-                                              class="delete-icon" 
-                                              onclick={`window.openDeleteModal('${entry.id}')`}
-                                            >
-                                              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                                            </button>
-                                          </div>
+                                          {entry.type === 'manual' ? (
+                                            <div class="action-group">
+                                              <button 
+                                                class="edit-icon" 
+                                                title="Edit Entry"
+                                                onclick={`window.openEditModal('${entry.id}', '${entry.description.replace(/'/g, "\\'")}', '${entry.date}', '${entry.startTime}', '${entry.endTime}', ${JSON.stringify(entry.documentationUrls)})`}
+                                              >
+                                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                                              </button>
+                                              <button 
+                                                type="button"
+                                                class="delete-icon" 
+                                                onclick={`window.openDeleteModal('${entry.id}')`}
+                                              >
+                                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                              </button>
+                                            </div>
+                                          ) : (
+                                            <div class="action-group read-only" title="Synced from Clockify">
+                                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="sync-lock-icon">
+                                                <path d="M21 12a9 9 0 0 1-9 9m9-9a9 9 0 0 0-9-9m9 9H3m9 9a9 9 0 0 1-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"/>
+                                              </svg>
+                                            </div>
+                                          )}
                                         </div>
                                       </div>
                                     ))}
@@ -531,9 +519,37 @@ const formatTo24hr = (timeStr: string) => {
                       </div>
                     </div>
                   )) : (
-                    <div class="empty-list">No manual logs recorded yet.</div>
+                    <div class="empty-list">No activity logs found for the selected filter.</div>
                   )}
                 </div>
+                
+                {totalPages > 1 && (
+                  <div class="pagination-controls">
+                    <button 
+                      type="button"
+                      class="pagination-btn"
+                      disabled={currentPage <= 1}
+                      onclick={`window.changePage(${currentPage - 1})`}
+                      title="Previous Page"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+                    </button>
+                    
+                    <span class="pagination-info">
+                      Page <strong>{currentPage}</strong> of <strong>{totalPages}</strong> ({totalEntriesCount} logs)
+                    </span>
+                    
+                    <button 
+                      type="button"
+                      class="pagination-btn"
+                      disabled={currentPage >= totalPages}
+                      onclick={`window.changePage(${currentPage + 1})`}
+                      title="Next Page"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+                    </button>
+                  </div>
+                )}
               </div>
 
               <!-- Right: Sidebar Tools -->
@@ -594,7 +610,6 @@ const formatTo24hr = (timeStr: string) => {
               </div>
             </div>
           </div>
-        )}
       </div>
 
       <!-- Edit Entry Modal -->
@@ -716,6 +731,23 @@ const formatTo24hr = (timeStr: string) => {
 
 <script is:inline>
   const params = new URLSearchParams(window.location.search);
+
+  window.setSourceFilter = (source) => {
+    const p = new URLSearchParams(window.location.search);
+    if (source === 'all') {
+      p.delete('source');
+    } else {
+      p.set('source', source);
+    }
+    p.set('page', '1');
+    window.location.search = p.toString();
+  };
+
+  window.changePage = (page) => {
+    const p = new URLSearchParams(window.location.search);
+    p.set('page', page.toString());
+    window.location.search = p.toString();
+  };
   const successVal = params.get('success');
   if (successVal) {
     const msg = successVal === 'true' ? 'Activity updated successfully' : successVal;
@@ -729,37 +761,7 @@ const formatTo24hr = (timeStr: string) => {
     window.history.replaceState({}, '', newUrl);
   }
 
-  // Live Timer Setup
-  let timerInterval = null;
-  function initLiveTimer() {
-    if (timerInterval) {
-      clearInterval(timerInterval);
-      timerInterval = null;
-    }
-    const timerSection = document.querySelector('.main-control');
-    const timerVal = document.getElementById('live-timer-val');
-    if (timerSection && timerSection.classList.contains('timer-active')) {
-      const startTime = new Date(timerSection.dataset.start || '').getTime();
-      if (startTime) {
-        const tick = () => {
-          const diff = Math.max(0, new Date().getTime() - startTime);
-          const h = Math.floor(diff / 3600000);
-          const m = Math.floor((diff % 3600000) / 60000);
-          const s = Math.floor((diff % 60000) / 1000);
-          if (timerVal) {
-            timerVal.textContent = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-          }
-        };
-        tick();
-        timerInterval = setInterval(tick, 1000);
-      }
-    } else if (timerVal) {
-      timerVal.textContent = "00:00:00";
-    }
-  }
 
-  // Initialize timer on load
-  initLiveTimer();
 
   // Date Filters Event Listeners
   const filterStart = document.getElementById('filter-start-date');
@@ -778,20 +780,20 @@ const formatTo24hr = (timeStr: string) => {
     } else {
       params.delete('endDate');
     }
+    params.set('page', '1');
     window.location.search = params.toString();
   }
 
-  if (filterStart) {
-    filterStart.addEventListener('change', updateFilters);
-  }
-  if (filterEnd) {
-    filterEnd.addEventListener('change', updateFilters);
+  const btnApply = document.getElementById('btn-apply-filters');
+  if (btnApply) {
+    btnApply.addEventListener('click', updateFilters);
   }
   if (btnReset) {
     btnReset.addEventListener('click', () => {
       const params = new URLSearchParams(window.location.search);
       params.delete('startDate');
       params.delete('endDate');
+      params.delete('page');
       window.location.search = params.toString();
     });
   }
@@ -1096,12 +1098,7 @@ const formatTo24hr = (timeStr: string) => {
       const parser = new DOMParser();
       const doc = parser.parseFromString(html, 'text/html');
 
-      // 1. Swap main control (timer UI)
-      const newMainControl = doc.querySelector('.main-control');
-      const oldMainControl = document.querySelector('.main-control');
-      if (newMainControl && oldMainControl) {
-        oldMainControl.replaceWith(newMainControl);
-      }
+
 
       // 2. Swap activity logs list
       const newLogList = doc.querySelector('.log-list');
@@ -1149,8 +1146,7 @@ const formatTo24hr = (timeStr: string) => {
       const deleteModal = document.getElementById('delete-log-modal');
       if (deleteModal) deleteModal.style.display = 'none';
 
-      // Re-initialize live timer
-      initLiveTimer();
+
 
       // Show toast if success/error parameter is in the redirect URL
       const successMsg = finalUrl.searchParams.get('success');
@@ -1372,53 +1368,38 @@ const formatTo24hr = (timeStr: string) => {
   .page-header p { font-size: 14px; color: var(--text-secondary); margin-top: 4px; }
 
   /* Main Control Section */
-  .main-control { 
-    background: rgba(13, 20, 33, 0.6); 
-    border: 1px solid var(--border-subtle); 
-    border-radius: 14px; 
-    padding: 24px 28px; 
-    margin-bottom: 32px;
-    backdrop-filter: blur(16px);
-    transition: 0.3s;
-  }
-  .timer-active { border-color: rgba(237, 102, 33, 0.4); background: rgba(237, 102, 33, 0.04); box-shadow: 0 0 32px rgba(237, 102, 33, 0.05); }
 
-  .control-form { display: flex; flex-direction: column; gap: 20px; }
-  .field-label { display: block; font-size: 11px; font-weight: 600; color: var(--text-secondary); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 8px; font-family: 'Outfit', sans-serif; }
-
-  .main-task-input { 
-    width: 100%; background: transparent; border: none; font-size: 20px; font-weight: 600;
-    color: white; outline: none; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 8px;
-    font-family: 'Outfit', sans-serif;
-  }
-  .main-task-input:focus { border-bottom-color: var(--ntv-orange); }
-
-  .time-display-wrapper { display: flex; align-items: flex-end; gap: 40px; }
-  .elapsed-box { flex: 1; }
-  .live-digits { font-family: 'JetBrains Mono', monospace; font-size: 32px; font-weight: 700; color: white; line-height: 1; }
-  .timer-active .live-digits { color: var(--ntv-orange); }
-
-  .inline-time-input { 
-    background: rgba(255,255,255,0.05); border: 1px solid var(--border-subtle); border-radius: 8px;
-    color: var(--ntv-orange); font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 600;
-    padding: 6px 10px; cursor: pointer; outline: none;
-  }
-
-  .btn-primary { 
-    display: flex; align-items: center; gap: 10px; padding: 12px 28px; 
-    border: none; border-radius: 10px; font-weight: 800; cursor: pointer; transition: 0.2s;
-    font-size: 13px; letter-spacing: 0.02em;
-  }
-  .btn-primary.start { background: var(--ntv-gradient); color: white; }
-  .btn-primary.stop { background: #ef4444; color: white; }
-  .btn-primary:hover { transform: translateY(-1px); filter: brightness(1.1); }
 
   /* Grid Layout */
   .content-grid { display: grid; grid-template-columns: 1.8fr 1fr; gap: 32px; }
   
   .column-title { font-size: 15px; font-weight: 600; color: var(--ntv-orange); letter-spacing: .04em; margin-bottom: 16px; }
   
-  .log-list { display: flex; flex-direction: column; gap: 0; }
+  .log-list { 
+    display: flex; 
+    flex-direction: column; 
+    gap: 0; 
+    max-height: 420px; 
+    overflow-y: auto;
+    padding-right: 8px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+  }
+  
+  /* Custom scrollbar for .log-list */
+  .log-list::-webkit-scrollbar {
+    width: 6px;
+  }
+  .log-list::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .log-list::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+  }
+  .log-list::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.2);
+  }
   .log-card { 
     background: rgba(5, 11, 22, 0.6); border: 1px solid var(--border-subtle); 
     border-bottom: none; padding: 16px 20px; display: flex; justify-content: space-between; align-items: center;
@@ -1749,13 +1730,24 @@ const formatTo24hr = (timeStr: string) => {
   /* History Header & Date Filters */
   .history-header {
     display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .history-header-top {
+    display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 20px;
-    gap: 16px;
   }
-  .history-header .column-title {
+  .history-header-top .column-title {
     margin-bottom: 0;
+  }
+  .history-header-filters {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
   }
   .date-filters {
     display: flex;
@@ -1801,16 +1793,42 @@ const formatTo24hr = (timeStr: string) => {
   .filter-date-input::-webkit-calendar-picker-indicator:hover {
     opacity: 1;
   }
+  .btn-apply-filter {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--ntv-gradient);
+    color: white;
+    border: none;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 0 16px;
+    height: 36px;
+    box-sizing: border-box;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: inherit;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+  .btn-apply-filter:hover {
+    filter: brightness(1.1);
+    transform: translateY(-1px);
+  }
   .btn-clear-filter {
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: 6px;
     background: rgba(239, 68, 68, 0.1);
     border: 1px solid rgba(239, 68, 68, 0.2);
     color: #f87171;
     font-size: 11px;
     font-weight: 700;
-    padding: 7px 12px;
+    padding: 0 12px;
+    height: 36px;
+    box-sizing: border-box;
     border-radius: 8px;
     cursor: pointer;
     transition: all 0.2s;
@@ -1868,7 +1886,7 @@ const formatTo24hr = (timeStr: string) => {
   
   .modal-actions { display: grid; grid-template-columns: 1fr 1.5fr; gap: 12px; margin-top: 12px; }
   .btn-cancel { background: rgba(255,255,255,0.05); border: 1px solid var(--border-subtle); color: #fff; padding: 12px; border-radius: 10px; cursor: pointer; font-weight: 600; }
-  .btn-save { background: var(--ntv-gradient); border: none; color: #fff; padding: 12px; border-radius: 10px; cursor: pointer; font-weight: 700; }
+  .btn-save { display: inline-flex; align-items: center; justify-content: center; background: var(--ntv-gradient); border: none; color: #fff; padding: 12px; border-radius: 10px; cursor: pointer; font-weight: 700; }
   .btn-save:hover { filter: brightness(1.1); transform: translateY(-1px); }
 
   /* Sidebar Column */
@@ -1911,7 +1929,8 @@ const formatTo24hr = (timeStr: string) => {
     .live-digits { font-size: 24px; }
     .shift-item { flex-direction: column; align-items: flex-start; gap: 16px; }
     .shift-actions { width: 100%; justify-content: space-between; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 12px; }
-    .history-header { flex-direction: column; align-items: flex-start; gap: 12px; }
+    .history-header { gap: 12px; }
+    .history-header-filters { flex-direction: column; align-items: stretch; gap: 12px; }
     .date-filters { width: 100%; flex-wrap: wrap; }
     .date-input-group { flex: 1; min-width: 120px; }
   }
@@ -2141,5 +2160,126 @@ const formatTo24hr = (timeStr: string) => {
   @keyframes spin {
     from { transform: rotate(0deg); }
     to { transform: rotate(360deg); }
+  }
+
+  /* Sync & Filter Badges / Styling */
+  .sync-mode-notice {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: rgba(96, 165, 250, 0.08);
+    border: 1px solid rgba(96, 165, 250, 0.15);
+    border-radius: 12px;
+    padding: 12px 16px;
+    margin-bottom: 24px;
+    font-size: 13px;
+    color: #93c5fd;
+  }
+  .sync-mode-notice .notice-icon {
+    color: #60a5fa;
+    display: flex;
+    align-items: center;
+  }
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .source-filter-tabs {
+    display: flex;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border-subtle);
+    padding: 3px;
+    border-radius: 8px;
+    gap: 2px;
+  }
+  .filter-tab {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    padding: 6px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: inherit;
+  }
+  .filter-tab:hover {
+    color: white;
+  }
+  .filter-tab.active {
+    background: rgba(255, 255, 255, 0.07);
+    color: white;
+  }
+  .shift-title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .source-badge {
+    font-size: 9px;
+    font-weight: 800;
+    padding: 2px 6px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+  .source-badge.clockify {
+    background: rgba(96, 165, 250, 0.1);
+    color: #60a5fa;
+    border: 1px solid rgba(96, 165, 250, 0.2);
+  }
+  .source-badge.manual {
+    background: rgba(237, 102, 33, 0.1);
+    color: var(--ntv-orange);
+    border: 1px solid rgba(237, 102, 33, 0.2);
+  }
+  .sync-lock-icon {
+    color: rgba(255, 255, 255, 0.35);
+  }
+
+  /* Pagination Styling */
+  .pagination-controls {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    margin-top: 24px;
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+  }
+  .pagination-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    border: 1px solid var(--border-subtle);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .pagination-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.08);
+    color: white;
+    border-color: rgba(255, 255, 255, 0.2);
+  }
+  .pagination-btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+  .pagination-info {
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+  .pagination-info strong {
+    color: white;
   }
 </style>

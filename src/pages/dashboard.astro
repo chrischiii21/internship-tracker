@@ -5,7 +5,7 @@ import Sidebar from '../components/Sidebar.astro';
 import { getSession } from '../lib/auth';
 import { parse } from 'cookie';
 import { getAppSettings, DEFAULT_SETTINGS } from '../lib/settings';
-import { getManualEntries } from '../lib/entries';
+import { getManualEntries, getActiveTimer, startTimer, stopTimer, updateTimerStart } from '../lib/entries';
 import { getClockifyUser, getRenderedHours, getStudentProgress } from '../lib/clockify';
 import { formatHMS, formatHours } from '../lib/utils';
 import { groupEntries } from '../lib/grouping';
@@ -25,6 +25,38 @@ const settings = await getAppSettings(user.id);
 if (settings.role === 'coordinator') {
   return Astro.redirect('/coordinator');
 }
+
+// POST actions for main timer control on dashboard
+if (Astro.request.method === 'POST') {
+  const formData = await Astro.request.formData();
+  const action = formData.get('action');
+
+  if (action === 'start-timer') {
+    const desc = formData.get('description') as string;
+    await startTimer(user.id, desc);
+    return Astro.redirect('/dashboard?success=Timer started');
+  }
+
+  if (action === 'update-start') {
+    const newStart = formData.get('startTime') as string;
+    await updateTimerStart(user.id, newStart);
+    return Astro.redirect('/dashboard?success=Start time updated');
+  }
+
+  if (action === 'stop-timer') {
+    const desc = formData.get('description') as string;
+    try {
+      await stopTimer(user.id, desc);
+      const { addSyncLog } = await import('../lib/logs');
+      await addSyncLog({ userId: user.id, type: 'Sync', status: 'Success', details: `Timer stopped: ${desc || 'No description'}` });
+      return Astro.redirect('/dashboard?success=Activity log saved');
+    } catch (e) {
+      return Astro.redirect(`/dashboard?error=${encodeURIComponent(e.message)}`);
+    }
+  }
+}
+
+const activeTimer = await getActiveTimer(user.id);
 
 // Calculate Total Progress using the Unified Sync Engine
 const renderedHours = await getStudentProgress(user.id, user.email, settings.startDate);
@@ -50,7 +82,7 @@ allRawEntries = [
     .map(e => ({ date: e.date, durationSeconds: e.durationSeconds }))
 ];
 
-const grouped = groupEntries(allRawEntries, settings.paySchedule);
+const grouped = groupEntries(allRawEntries, settings.hasAllowance ? settings.paySchedule : 'monthly');
 const adjustments = await getPayoutAdjustments(user.id);
 
 let runningCarryOver = 0;
@@ -282,6 +314,59 @@ const finishDateStr = estimatedFinishDate.toLocaleDateString('en-US', {
           </div>
         </div>
 
+        <!-- Main Timer Section -->
+        <section class={`main-control ${activeTimer ? 'timer-active' : ''}`} data-start={activeTimer?.startTime}>
+          <form method="POST" class="control-form" id="timer-main-form">
+            <div class="task-input-wrapper">
+              <label class="field-label">CURRENT TASK</label>
+              <input 
+                type="text" 
+                name="description" 
+                placeholder="Enter what you are working on..." 
+                value={activeTimer?.description || ''} 
+                autocomplete="off"
+                class="main-task-input"
+              />
+            </div>
+            
+            <div class="time-display-wrapper">
+              {activeTimer && (
+                <div class="edit-start-box">
+                  <label class="field-label">STARTED AT</label>
+                  <input 
+                    class="inline-time-input time-mask"
+                    maxlength="5"
+                    value={new Date(activeTimer.startTime).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Manila' })} 
+                    onchange="document.getElementById('action-hidden').value='update-start'; if (typeof this.form.requestSubmit === 'function') { this.form.requestSubmit(); } else { this.form.submit(); }"
+                  />
+                </div>
+              )}
+              
+              <div class="elapsed-box">
+                <label class="field-label">RENDERED TIME</label>
+                <span id="live-timer-val" class="live-digits">00:00:00</span>
+              </div>
+
+              <input type="hidden" name="action" id="action-hidden" value={activeTimer ? "stop-timer" : "start-timer"} />
+              <input type="hidden" name="id" id="id-hidden" />
+
+              <div class="button-box">
+                {activeTimer ? (
+                  <button type="submit" onclick="document.getElementById('action-hidden').value='stop-timer'" class="btn-primary stop">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+                    STOP TASK
+                  </button>
+                ) : (
+                  <button type="submit" onclick="document.getElementById('action-hidden').value='start-timer'" class="btn-primary start">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M5 3l14 9-14 9V3z"/></svg>
+                    START TIMER
+                  </button>
+                )}
+              </div>
+            </div>
+          </form>
+        </section>
+
         <div class="metrics-grid">
           <div class="metrics-column">
             <div class="metric-card">
@@ -372,61 +457,76 @@ const finishDateStr = estimatedFinishDate.toLocaleDateString('en-US', {
       <div class="item-main">
         <span class="item-label">{item.label}</span>
         <div class="item-meta">
-          <span class="item-hours">{formatHours(item.rendered)} rendered</span>
-          {item.carryOverIn !== 0 && (
-            <span class={`carry-tag ${item.carryOverIn > 0 ? 'plus' : 'minus'}`}>
-              {item.carryOverIn > 0 ? '+' : ''}₱{item.carryOverIn.toLocaleString()} carry-over
-            </span>
+          {settings.hasAllowance ? (
+            <>
+              <span class="item-hours">{formatHours(item.rendered)} rendered</span>
+              {item.carryOverIn !== 0 && (
+                <span class={`carry-tag ${item.carryOverIn > 0 ? 'plus' : 'minus'}`}>
+                  {item.carryOverIn > 0 ? '+' : ''}₱{item.carryOverIn.toLocaleString()} carry-over
+                </span>
+              )}
+            </>
+          ) : (
+            <span class="item-hours">Internship Hours Logged</span>
           )}
         </div>
       </div>
-      <div class="item-values">
-        {item.isAdjusted ? (
-          <div class="payout-status set">
-            <div class="value-group">
-              <span class="v-label">Received</span>
-              <span class="v-amount accent">₱ {item.actualReceived.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+      {settings.hasAllowance ? (
+        <div class="item-values">
+          {item.isAdjusted ? (
+            <div class="payout-status set">
+              <div class="value-group">
+                <span class="v-label">Received</span>
+                <span class="v-amount accent">₱ {item.actualReceived.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </div>
+              <button class="btn-edit-payout" data-label={item.label} data-amount={item.actualReceived.toFixed(2)}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4L18.5 2.5z"></path></svg>
+              </button>
             </div>
-            <button class="btn-edit-payout" data-label={item.label} data-amount={item.actualReceived.toFixed(2)}>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4L18.5 2.5z"></path></svg>
-            </button>
-          </div>
-        ) : (
-          <div class="payout-status pending">
-             <div class="value-group">
-              <span class="v-label">Expected</span>
-              <span class="v-amount">₱ {item.totalExpected.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+          ) : (
+            <div class="payout-status pending">
+               <div class="value-group">
+                <span class="v-label">Expected</span>
+                <span class="v-amount">₱ {item.totalExpected.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </div>
+              <div class="status-actions">
+                <form action="/api/payouts" method="POST" class="inline-form">
+                  <input type="hidden" name="periodLabel" value={item.label} />
+                  <input type="hidden" name="amountReceived" value={item.totalExpected.toFixed(2)} />
+                  <button type="submit" class="btn-received">Received</button>
+                </form>
+                <button class="btn-edit-payout secondary" data-label={item.label} data-amount={item.totalExpected.toFixed(2)}>Edit</button>
+              </div>
             </div>
-            <div class="status-actions">
-              <form action="/api/payouts" method="POST" class="inline-form">
-                <input type="hidden" name="periodLabel" value={item.label} />
-                <input type="hidden" name="amountReceived" value={item.totalExpected.toFixed(2)} />
-                <button type="submit" class="btn-received">Received</button>
-              </form>
-              <button class="btn-edit-payout secondary" data-label={item.label} data-amount={item.totalExpected.toFixed(2)}>Edit</button>
-            </div>
-          </div>
-        )}
+          )}
 
-        <form action="/api/payouts" method="POST" class="payout-edit-form" style="display: none;">
-          <input type="hidden" name="periodLabel" value={item.label} />
-          <div class="compact-input-group">
-            <span class="v-currency">₱</span>
-            <input 
-              type="number" 
-              name="amountReceived" 
-              value={item.actualReceived.toFixed(2)} 
-              step="0.01" 
-              class="v-amount-input"
-            />
-            <button type="submit" class="btn-save-inline">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-            </button>
+          <form action="/api/payouts" method="POST" class="payout-edit-form" style="display: none;">
+            <input type="hidden" name="periodLabel" value={item.label} />
+            <div class="compact-input-group">
+              <span class="v-currency">₱</span>
+              <input 
+                type="number" 
+                name="amountReceived" 
+                value={item.actualReceived.toFixed(2)} 
+                step="0.01" 
+                class="v-amount-input"
+              />
+              <button type="submit" class="btn-save-inline">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : (
+        <div class="item-values">
+          <div class="value-group">
+            <span class="v-label">Rendered</span>
+            <span class="v-amount">{formatHours(item.rendered)}</span>
           </div>
-        </form>
-      </div>
+        </div>
+      )}
     </div>
-    {item.carryOverOut !== 0 && (
+    {settings.hasAllowance && item.carryOverOut !== 0 && (
       <div class="carry-over-line">
         <span class="line-text">
           {item.carryOverOut > 0 ? 'Excess' : 'Shortage'} of ₱{Math.abs(item.carryOverOut).toLocaleString()} added to next period
@@ -477,6 +577,107 @@ const finishDateStr = estimatedFinishDate.toLocaleDateString('en-US', {
         input.select();
       }
     });
+  });
+
+  // Live Timer Setup
+  let timerInterval = null;
+  function initLiveTimer() {
+    if (timerInterval) {
+      clearInterval(timerInterval);
+      timerInterval = null;
+    }
+    const timerSection = document.querySelector('.main-control');
+    const timerVal = document.getElementById('live-timer-val');
+    if (timerSection && timerSection.classList.contains('timer-active')) {
+      const startTime = new Date(timerSection.dataset.start || '').getTime();
+      if (startTime) {
+        const tick = () => {
+          const diff = Math.max(0, new Date().getTime() - startTime);
+          const h = Math.floor(diff / 3600000);
+          const m = Math.floor((diff % 3600000) / 60000);
+          const s = Math.floor((diff % 60000) / 1000);
+          if (timerVal) {
+            timerVal.textContent = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+          }
+        };
+        tick();
+        timerInterval = setInterval(tick, 1000);
+      }
+    } else if (timerVal) {
+      timerVal.textContent = "00:00:00";
+    }
+  }
+
+  // Initialize timer on load
+  initLiveTimer();
+
+  // Time Masking Logic
+  document.addEventListener('input', (e) => {
+    if (e.target.classList.contains('time-mask')) {
+      let val = e.target.value.replace(/\D/g, '');
+      if (val.length > 4) val = val.slice(0, 4);
+      
+      // Auto-colon only for 4 digits as you type
+      if (val.length === 4) {
+        e.target.value = val.slice(0, 2) + ':' + val.slice(2);
+      } else {
+        e.target.value = val;
+      }
+    }
+  });
+
+  function formatTimeInput(target) {
+    let val = target.value.replace(/\D/g, '');
+    if (!val) return;
+    
+    const is24hr = !target.closest('.time-12hr-wrapper');
+    
+    if (val.length === 1) {
+      const num = parseInt(val, 10);
+      if (num >= 1 && num <= 9) {
+        target.value = '0' + val + ':00';
+      } else if (num === 0) {
+        target.value = is24hr ? '00:00' : '12:00';
+      }
+    } else if (val.length === 2) {
+      const num = parseInt(val, 10);
+      const maxHour = is24hr ? 23 : 12;
+      if (num >= 1 && num <= maxHour) {
+        target.value = val + ':00';
+      } else if (num === 0) {
+        target.value = is24hr ? '00:00' : '12:00';
+      } else {
+        const h = parseInt(val[0], 10);
+        let m = parseInt(val[1], 10);
+        if (m > 5) m = 5;
+        target.value = '0' + h + ':' + m + '0';
+      }
+    } else if (val.length === 3) {
+      target.value = '0' + val[0] + ':' + val.slice(1);
+    } else if (val.length === 4) {
+      target.value = val.slice(0, 2) + ':' + val.slice(2);
+    }
+  }
+
+  document.addEventListener('change', (e) => {
+    if (e.target.classList.contains('time-mask')) {
+      formatTimeInput(e.target);
+    }
+  }, true);
+
+  document.addEventListener('blur', (e) => {
+    if (e.target.classList.contains('time-mask')) {
+      formatTimeInput(e.target);
+    }
+  }, true);
+
+  // Handle backspace
+  document.addEventListener('keydown', (e) => {
+    if (e.target.classList.contains('time-mask') && e.key === 'Backspace') {
+      if (e.target.value.includes(':') && e.target.value.length === 5) {
+         // Let normal backspace work
+      }
+    }
   });
 </script>
 
@@ -730,5 +931,54 @@ const finishDateStr = estimatedFinishDate.toLocaleDateString('en-US', {
     .setup-header p { font-size: 13px; }
     .toggle-text { font-size: 13px; }
     .check-label-setup input { width: 18px; height: 18px; }
+  }
+
+  /* Main Control Section */
+  .main-control { 
+    background: rgba(13, 20, 33, 0.6); 
+    border: 1px solid var(--border-subtle); 
+    border-radius: 14px; 
+    padding: 24px 28px; 
+    margin-bottom: 32px;
+    backdrop-filter: blur(16px);
+    transition: 0.3s;
+  }
+  .timer-active { border-color: rgba(237, 102, 33, 0.4); background: rgba(237, 102, 33, 0.04); box-shadow: 0 0 32px rgba(237, 102, 33, 0.05); }
+
+  .control-form { display: flex; flex-direction: column; gap: 20px; }
+  .field-label { display: block; font-size: 11px; font-weight: 600; color: var(--text-secondary); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 8px; font-family: 'Outfit', sans-serif; }
+
+  .main-task-input { 
+    width: 100%; background: transparent; border: none; font-size: 20px; font-weight: 600;
+    color: white; outline: none; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 8px;
+    font-family: 'Outfit', sans-serif;
+  }
+  .main-task-input:focus { border-bottom-color: var(--ntv-orange); }
+
+  .time-display-wrapper { display: flex; align-items: flex-end; gap: 40px; }
+  .elapsed-box { flex: 1; }
+  .live-digits { font-family: 'JetBrains Mono', monospace; font-size: 32px; font-weight: 700; color: white; line-height: 1; }
+  .timer-active .live-digits { color: var(--ntv-orange); }
+
+  .inline-time-input { 
+    background: rgba(255,255,255,0.05); border: 1px solid var(--border-subtle); border-radius: 8px;
+    color: var(--ntv-orange); font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 600;
+    padding: 6px 10px; cursor: pointer; outline: none;
+  }
+
+  .btn-primary { 
+    display: flex; align-items: center; gap: 10px; padding: 12px 28px; 
+    border: none; border-radius: 10px; font-weight: 800; cursor: pointer; transition: 0.2s;
+    font-size: 13px; letter-spacing: 0.02em;
+  }
+  .btn-primary.start { background: var(--ntv-gradient); color: white; }
+  .btn-primary.stop { background: #ef4444; color: white; }
+  .btn-primary:hover { transform: translateY(-1px); filter: brightness(1.1); }
+
+  @media (max-width: 900px) {
+    .time-display-wrapper { flex-direction: column; align-items: stretch; gap: 24px; }
+    .btn-primary { width: 100%; justify-content: center; }
+    .main-control { padding: 20px; }
+    .live-digits { font-size: 24px; }
   }
 </style>

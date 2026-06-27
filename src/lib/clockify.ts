@@ -6,6 +6,7 @@ const CLOCKIFY_API_URL = 'https://api.clockify.me/api/v1';
 const userCache = new Map<string, { data: any, expiry: number }>();
 const hoursCache = new Map<string, { data: any, expiry: number }>();
 const dtrEntriesCache = new Map<string, { data: any, expiry: number }>();
+const detailedEntriesCache = new Map<string, { data: any, expiry: number }>();
 
 export async function getClockifyUser(email: string) {
   const cacheKey = email.toLowerCase();
@@ -234,4 +235,80 @@ function parseIsoDuration(duration: string) {
   const matches = duration.match(regex);
   if (!matches) return 0;
   return (parseInt(matches[1] || '0') * 86400) + (parseInt(matches[2] || '0') * 3600) + (parseInt(matches[3] || '0') * 60) + parseInt(matches[4] || '0');
+}
+
+export async function getClockifyDetailedEntries(clockifyUserId: string, startDate?: string) {
+  const cacheKey = `${clockifyUserId}_${startDate || ''}`;
+  const cached = detailedEntriesCache.get(cacheKey);
+  if (cached && cached.expiry > Date.now()) {
+    return cached.data;
+  }
+
+  const apiKey = import.meta.env.CLOCKIFY_API_KEY;
+  const workspaceId = import.meta.env.CLOCKIFY_WORKSPACE_ID;
+  if (!clockifyUserId || !apiKey || !workspaceId) return [];
+
+  let page = 1;
+  const pageSize = 50;
+  let hasMore = true;
+  const allEntries: any[] = [];
+
+  while (hasMore) {
+    const start = startDate ? new Date(startDate).toISOString() : '2024-01-01T00:00:00Z';
+    try {
+      const response = await fetch(
+        `${CLOCKIFY_API_URL}/workspaces/${workspaceId}/user/${clockifyUserId}/time-entries?page=${page}&page-size=${pageSize}&start=${start}&hydrated=true`,
+        { headers: { 'X-Api-Key': apiKey } }
+      );
+      if (!response.ok) break;
+      const entries = await response.json();
+      if (entries.length === 0) {
+        hasMore = false;
+      } else {
+        for (const entry of entries) {
+          if (entry.timeInterval && entry.timeInterval.duration) {
+            const seconds = parseIsoDuration(entry.timeInterval.duration);
+            const startD = new Date(entry.timeInterval.start);
+            const endD = entry.timeInterval.end ? new Date(entry.timeInterval.end) : new Date();
+            
+            const isoDate = startD.toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
+            const startTime = startD.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Manila' });
+            const endTime = entry.timeInterval.end 
+              ? endD.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Manila' })
+              : '';
+
+            const taskName = entry.task && entry.task.name ? entry.task.name : '';
+            const rawDescription = entry.description || '';
+            let description = 'General Work';
+            if (taskName && rawDescription) {
+              description = `${taskName}: ${rawDescription}`;
+            } else if (taskName) {
+              description = taskName;
+            } else if (rawDescription) {
+              description = rawDescription;
+            }
+
+            allEntries.push({
+              id: entry.id,
+              description,
+              date: isoDate,
+              startTime,
+              endTime,
+              durationSeconds: seconds,
+              documentationUrls: [],
+              type: 'clockify'
+            });
+          }
+        }
+        page++;
+        if (entries.length < pageSize) hasMore = false;
+      }
+    } catch (error) {
+      console.error('Error fetching detailed Clockify entries:', error);
+      break;
+    }
+  }
+  // Cache detailed entries for 2 minutes
+  detailedEntriesCache.set(cacheKey, { data: allEntries, expiry: Date.now() + 2 * 60 * 1000 });
+  return allEntries;
 }
