@@ -2387,7 +2387,7 @@ const formatTo24hr = (timeStr: string) => {
   .edit-form .form-group { display: flex; flex-direction: column; gap: 6px; }
   .edit-form .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
   .edit-form label { font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; }
-  .edit-form > input, .edit-form .form-group > input { background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 10px 14px; color: #fff; font-size: 14px; outline: none; }
+  .edit-form > input, .edit-form .form-group > input { display: block; width: 100%; box-sizing: border-box; background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 10px 14px; color: #fff; font-size: 14px; outline: none; }
   .edit-form > input:focus, .edit-form .form-group > input:focus { border-color: var(--ntv-orange); }
   
   .modal-actions { display: grid; grid-template-columns: 1fr 1.5fr; gap: 12px; margin-top: 12px; }
@@ -2407,7 +2407,7 @@ const formatTo24hr = (timeStr: string) => {
   .side-form { display: flex; flex-direction: column; gap: 14px; }
   .input-group label { display: block; font-size: 10px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; margin-bottom: 6px; }
   .input-group > input { 
-    width: 100%; background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle);
+    display: block; width: 100%; box-sizing: border-box; background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle);
     border-radius: 8px; padding: 10px 12px; color: white; font-size: 13px;
   }
   .input-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
