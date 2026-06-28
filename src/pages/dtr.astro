@@ -45,17 +45,12 @@ if (mySettings.role === "coordinator") {
   // Apply section filtering
   filteredStudents = students;
   if (selectedSection !== "all") {
-    if (selectedSection === "unassigned") {
-      filteredStudents = students.filter(s => !s.section_id);
-    } else {
-      filteredStudents = students.filter(s => s.section_id === selectedSection);
-    }
+    filteredStudents = students.filter(s => s.section_id === selectedSection);
   }
 
   // Determine current viewUserId based on filtered student list
   if (targetStudentId && students.some((s) => s.user_id === targetStudentId)) {
     const isStudentInFiltered = selectedSection === 'all' || 
-      (selectedSection === 'unassigned' && !students.find(s => s.user_id === targetStudentId)?.section_id) ||
       (students.find(s => s.user_id === targetStudentId)?.section_id === selectedSection);
 
     if (isStudentInFiltered) {
@@ -174,7 +169,6 @@ const needsUpdate =
                   class="dtr-select"
                 >
                   <option value="all" selected={selectedSection === 'all'}>All Sections</option>
-                  <option value="unassigned" selected={selectedSection === 'unassigned'}>General / Unassigned</option>
                   {sections.map((sec) => (
                     <option value={sec.id} selected={sec.id === selectedSection}>
                       {sec.section_name}
@@ -582,11 +576,17 @@ const needsUpdate =
 
   .dtr-scroll-wrapper {
     width: 100%;
-    overflow: visible;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
     padding: 40px 20px;
     background: rgba(0, 0, 0, 0.2);
     display: flex;
-    justify-content: center;
+    justify-content: flex-start;
+  }
+  @media (min-width: 860px) {
+    .dtr-scroll-wrapper {
+      justify-content: center;
+    }
   }
 
   .dtr-container {
@@ -832,5 +832,10 @@ const needsUpdate =
       flex: 1 !important;
       justify-content: center !important;
     }
+  }
+
+  @media (max-width: 900px) {
+    #portal-main { margin-left: 0; padding: 20px; width: 100%; overflow-x: hidden; }
+    .dtr-scroll-wrapper { padding: 20px 10px; }
   }
 </style>

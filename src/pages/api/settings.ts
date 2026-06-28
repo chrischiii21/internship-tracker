@@ -63,7 +63,7 @@ export const POST: APIRoute = async ({ request }) => {
       // Find coordinator/section by invite code
       const { supabase } = await import('../../lib/supabase');
       
-      // 1. Try to find the invite code in coordinator_sections first
+      // Try to find the invite code in coordinator_sections
       const { data: section } = await supabase
         .from('coordinator_sections')
         .select('id, coordinator_id')
@@ -74,19 +74,7 @@ export const POST: APIRoute = async ({ request }) => {
         coordinatorId = section.coordinator_id;
         sectionId = section.id;
       } else {
-        // 2. Try to find the invite code in coordinator_settings as a fallback (general code)
-        const { data: coord } = await supabase
-          .from('coordinator_settings')
-          .select('user_id')
-          .eq('invite_code', coordinatorInvite.toUpperCase().trim())
-          .maybeSingle();
-        
-        if (coord) {
-          coordinatorId = coord.user_id;
-          sectionId = null;
-        } else {
-          throw new Error('Invalid invite code. Please check with your coordinator.');
-        }
+        throw new Error('Invalid invite code. Please check with your coordinator.');
       }
     }
 

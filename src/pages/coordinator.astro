@@ -54,11 +54,7 @@ const selectedStatus = Astro.url.searchParams.get('status') || 'all';
 // Apply Section filtering first to determine statistical overview counts
 let sectionFilteredStudents = studentStats;
 if (selectedSection !== 'all') {
-  if (selectedSection === 'unassigned') {
-    sectionFilteredStudents = studentStats.filter(s => !s.section_id);
-  } else {
-    sectionFilteredStudents = studentStats.filter(s => s.section_id === selectedSection);
-  }
+  sectionFilteredStudents = studentStats.filter(s => s.section_id === selectedSection);
 }
 
 const completedCount = sectionFilteredStudents.filter(s => Number(s.percent) >= 100).length;
@@ -137,14 +133,9 @@ if (selectedStatus === 'completed') {
             <h1>Coordinator <span class="accent">Dashboard</span></h1>
             <p>Monitoring progress for students under your supervision.</p>
           </div>
-          <div class="invite-panel">
-            <span class="invite-label">YOUR INVITE CODE</span>
-            <div class="invite-code-box">
-              <span class="code">{settings.inviteCode}</span>
-              <button class="copy-invite-btn" title="Copy invite message" data-code={settings.inviteCode}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-              </button>
-            </div>
+          <div class="invite-panel-note">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="note-icon"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+            <p>To connect with student interns, go to <a href="/sections" class="note-link">Manage Sections</a> to create sections and get unique invite codes.</p>
           </div>
         </div>
 
@@ -172,7 +163,6 @@ if (selectedStatus === 'completed') {
                 <label for="section-filter">Section:</label>
                 <select id="section-filter" class="filter-select" onchange="const params = new URLSearchParams(window.location.search); params.set('section', this.value); window.location.search = params.toString();">
                   <option value="all" selected={selectedSection === 'all'}>All Sections</option>
-                  <option value="unassigned" selected={selectedSection === 'unassigned'}>Unassigned / General</option>
                   {sections?.map(sec => (
                     <option value={sec.id} selected={selectedSection === sec.id}>{sec.section_name}</option>
                   ))}
@@ -314,10 +304,35 @@ if (selectedStatus === 'completed') {
   .accent { background: var(--ntv-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
   .header-main p { color: var(--text-secondary); font-size: 14px; margin-top: 4px; }
 
-  .invite-panel { background: rgba(13, 20, 33, 0.6); border: 1px solid rgba(237, 102, 33, 0.2); padding: 12px 20px; border-radius: 12px; text-align: right; }
-  .invite-label { display: block; font-size: 9px; font-weight: 800; color: var(--ntv-orange); letter-spacing: 0.1em; margin-bottom: 6px; }
-  .invite-code-box { display: flex; align-items: center; gap: 12px; justify-content: flex-end; }
-  .code { font-family: 'JetBrains Mono', monospace; font-size: 20px; font-weight: 700; color: #fff; }
+  .invite-panel-note { 
+    background: rgba(13, 20, 33, 0.6); 
+    border: 1px solid rgba(237, 102, 33, 0.15); 
+    padding: 12px 18px; 
+    border-radius: 12px; 
+    max-width: 320px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .note-icon {
+    color: var(--ntv-orange);
+    flex-shrink: 0;
+  }
+  .invite-panel-note p {
+    font-size: 12px;
+    color: var(--text-secondary);
+    line-height: 1.4;
+    margin: 0;
+    text-align: left;
+  }
+  .note-link {
+    color: var(--ntv-orange);
+    text-decoration: underline;
+    font-weight: 600;
+  }
+  .note-link:hover {
+    color: #fff;
+  }
   .copy-btn { background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 4px; border-radius: 4px; transition: 0.2s; }
   .copy-btn:hover { color: #fff; background: rgba(255,255,255,0.05); }
 
@@ -347,7 +362,8 @@ if (selectedStatus === 'completed') {
   @media (max-width: 600px) {
     .section-header-row { flex-direction: column; align-items: flex-start; }
     .filter-group-row { flex-direction: column; width: 100%; align-items: stretch; }
-    .filter-select { width: 100%; }
+    .filter-box { width: 100%; justify-content: space-between; }
+    .filter-select { width: 100%; flex: 1; }
   }
 
   .student-info-cell { display: flex; align-items: center; gap: 12px; }
@@ -375,11 +391,11 @@ if (selectedStatus === 'completed') {
   .mini-track { width: 100%; height: 4px; background: rgba(255,255,255,0.05); border-radius: 2px; }
   .mini-fill { height: 100%; background: var(--ntv-gradient); border-radius: 2px; }
 
-  .status-badge { font-size: 10px; font-weight: 700; padding: 4px 10px; border-radius: 20px; }
+  .status-badge { display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; font-size: 10px; font-weight: 700; padding: 4px 10px; border-radius: 20px; }
   .status-badge.active { background: rgba(52, 211, 153, 0.1); color: #34d399; border: 1px solid rgba(52, 211, 153, 0.2); }
   .status-badge.done { background: var(--ntv-gradient); color: #fff; }
 
-  .view-link { font-size: 11px; font-weight: 700; color: var(--ntv-orange); text-decoration: none; padding: 6px 12px; background: rgba(237, 102, 33, 0.1); border: 1px solid rgba(237, 102, 33, 0.2); border-radius: 6px; transition: 0.2s; }
+  .view-link { display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; font-size: 11px; font-weight: 700; color: var(--ntv-orange); text-decoration: none; padding: 6px 12px; background: rgba(237, 102, 33, 0.1); border: 1px solid rgba(237, 102, 33, 0.2); border-radius: 6px; transition: 0.2s; }
   .view-link:hover { background: var(--ntv-orange); color: #fff; }
 
   .empty-state { text-align: center; padding: 60px; color: var(--text-secondary); font-style: italic; }
@@ -388,8 +404,7 @@ if (selectedStatus === 'completed') {
     #portal-main { margin-left: 0; padding: 20px; width: 100%; overflow-x: hidden; }
     #coord-content { width: 100%; }
     .page-header { flex-direction: column; gap: 20px; }
-    .invite-panel { width: 100%; text-align: left; }
-    .invite-code-box { justify-content: flex-start; }
+    .invite-panel-note { max-width: 100%; width: 100%; }
     .table-wrapper { overflow-x: auto; }
     .student-table { min-width: 700px; }
   }
@@ -591,6 +606,10 @@ if (selectedStatus === 'completed') {
     border-color: rgba(237, 102, 33, 0.4);
     color: var(--ntv-orange);
     transform: scale(1.1);
+  }
+  
+  @media (max-width: 480px) {
+    .modal-content { padding: 24px; }
   }
 </style>
 
