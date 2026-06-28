@@ -2285,7 +2285,7 @@ const formatTo24hr = (timeStr: string) => {
     display: flex;
     flex-direction: column;
     padding: 28px;
-    background: #0a1020;
+    background: var(--modal-bg);
     border: 1px solid rgba(237, 102, 33, 0.3);
     border-radius: 20px;
   }
@@ -2363,7 +2363,7 @@ const formatTo24hr = (timeStr: string) => {
   .input-hint { font-size: 11px; color: var(--text-secondary); opacity: 0.7; margin-top: 8px; }
   .mt-8 { margin-top: 8px; }
   .modal-overlay { position: fixed; inset: 0; background: rgba(5, 11, 22, 0.85); backdrop-filter: blur(8px); z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 20px; }
-  .modal-content { background: #0d1421; border: 1px solid rgba(237, 102, 33, 0.3); border-radius: 20px; width: 100%; max-width: 440px; padding: 32px; animation: modalIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) both; position: relative; }
+  .modal-content { background: var(--modal-bg); border: 1px solid rgba(237, 102, 33, 0.3); border-radius: 20px; width: 100%; max-width: 440px; padding: 32px; animation: modalIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) both; position: relative; }
   
   .modal-header-danger { text-align: center; margin-bottom: 20px; }
   .warning-icon { 

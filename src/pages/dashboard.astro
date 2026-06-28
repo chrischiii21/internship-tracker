@@ -970,7 +970,7 @@ const finishDateStr = estimatedFinishDate.toLocaleDateString('en-US', {
   @keyframes fadeIn { from{opacity:0} to{opacity:1} }
 
   .setup-card { 
-    background: #0d1421; border: 1px solid rgba(237, 102, 33, 0.25); 
+    background: var(--modal-bg); border: 1px solid rgba(237, 102, 33, 0.25); 
     border-radius: 28px; width: 100%; max-width: 740px; padding: 48px; 
     box-shadow: 0 25px 60px rgba(0,0,0,0.6); max-height: 94vh; 
     overflow-y: auto; position: relative;
@@ -1021,7 +1021,7 @@ const finishDateStr = estimatedFinishDate.toLocaleDateString('en-US', {
     border-color: var(--ntv-orange); background: rgba(237, 102, 33, 0.04);
     box-shadow: 0 0 0 4px rgba(237, 102, 33, 0.1);
   }
-  .setup-select option { background: #0d1421; color: white; }
+  .setup-select option { background: var(--modal-bg); color: var(--text-primary); }
   
   .info-note { background: rgba(96, 165, 250, 0.08); border: 1px solid rgba(96, 165, 250, 0.15); padding: 20px; border-radius: 16px; color: #93c5fd; font-size: 14px; text-align: center; line-height: 1.6; }
   
@@ -1128,7 +1128,7 @@ const finishDateStr = estimatedFinishDate.toLocaleDateString('en-US', {
     padding: 20px;
   }
   .modal-content {
-    background: #0d1421;
+    background: var(--modal-bg);
     border: 1px solid rgba(237, 102, 33, 0.3);
     border-radius: 20px;
     width: 100%;

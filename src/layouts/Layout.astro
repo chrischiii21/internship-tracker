@@ -20,6 +20,14 @@ import Toaster from "../components/Toaster.astro";
       href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
+    <script is:inline>
+      const savedTheme = localStorage.getItem('theme') || 'dark';
+      if (savedTheme === 'light') {
+        document.documentElement.classList.add('light-mode');
+      } else {
+        document.documentElement.classList.remove('light-mode');
+      }
+    </script>
   </head>
   <body>
     <div class="sidebar-overlay" id="global-overlay"></div>
@@ -76,6 +84,141 @@ import Toaster from "../components/Toaster.astro";
     --text-secondary: rgba(255, 255, 255, 0.65);
     --border-subtle: rgba(255, 255, 255, 0.08);
     --card-bg: rgba(13, 20, 33, 0.7);
+    --modal-bg: #0d1421;
+  }
+
+  :root.light-mode {
+    --ntv-bg: #f5f6f8;
+    --text-primary: #121826;
+    --text-secondary: rgba(18, 24, 38, 0.65);
+    --border-subtle: rgba(18, 24, 38, 0.08);
+    --card-bg: #ffffff;
+    --modal-bg: #ffffff;
+  }
+
+  /* Global Light Mode Overrides */
+  .light-mode h1,
+  .light-mode h2,
+  .light-mode h3,
+  .light-mode h4,
+  .light-mode h5,
+  .light-mode h6,
+  .light-mode .row-name,
+  .light-mode .name,
+  .light-mode .stat-value,
+  .light-mode .box-title,
+  .light-mode .log-title,
+  .light-mode .link-status,
+  .light-mode .code,
+  .light-mode .modal-header h3,
+  .light-mode .modal-header h2,
+  .light-mode .modal-header-danger h2,
+  .light-mode .modal-content h3,
+  .light-mode .modal-content h2,
+  .light-mode .roster-header h2,
+  .light-mode .roster-header a,
+  .light-mode .details-modal-grid label,
+  .light-mode .edit-form label,
+  .light-mode .form-group label,
+  .light-mode .settings-card h3,
+  .light-mode .setup-card h2,
+  .light-mode .setup-card label {
+    color: var(--text-primary) !important;
+  }
+
+  .light-mode input,
+  .light-mode select,
+  .light-mode textarea {
+    background-color: rgba(0, 0, 0, 0.03) !important;
+    border-color: rgba(0, 0, 0, 0.15) !important;
+    color: var(--text-primary) !important;
+  }
+  .light-mode input:focus,
+  .light-mode select:focus,
+  .light-mode textarea:focus {
+    border-color: var(--ntv-orange) !important;
+  }
+
+  .light-mode select option {
+    background-color: var(--modal-bg) !important;
+    color: var(--text-primary) !important;
+  }
+
+  .light-mode .modal-content,
+  .light-mode .progress-modal-content,
+  .light-mode .doc-viewer-modal-content,
+  .light-mode .details-modal-content,
+  .light-mode .info-modal-content {
+    background-color: var(--modal-bg) !important;
+    border-color: rgba(0, 0, 0, 0.12) !important;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.1) !important;
+  }
+
+  .light-mode .btn-cancel,
+  .light-mode .cancel-btn {
+    background-color: rgba(0, 0, 0, 0.05) !important;
+    border-color: rgba(0, 0, 0, 0.12) !important;
+    color: var(--text-primary) !important;
+  }
+  .light-mode .btn-cancel:hover,
+  .light-mode .cancel-btn:hover {
+    background-color: rgba(0, 0, 0, 0.08) !important;
+  }
+
+  .light-mode #sys-header {
+    background: rgba(255, 255, 255, 0.85) !important;
+    border-bottom-color: rgba(0, 0, 0, 0.08) !important;
+  }
+
+  .light-mode #sidebar {
+    background: rgba(255, 255, 255, 0.85) !important;
+    border-right-color: rgba(0, 0, 0, 0.08) !important;
+  }
+
+  .light-mode .nav-item:hover {
+    background-color: rgba(0, 0, 0, 0.03) !important;
+    color: var(--text-primary) !important;
+  }
+
+  .light-mode .theme-toggle-btn {
+    background-color: rgba(0, 0, 0, 0.05) !important;
+    border-color: rgba(0, 0, 0, 0.12) !important;
+    color: var(--text-primary) !important;
+  }
+  .light-mode .theme-toggle-btn:hover {
+    background-color: rgba(0, 0, 0, 0.08) !important;
+  }
+
+  .light-mode .copy-invite-btn {
+    background-color: rgba(0, 0, 0, 0.05) !important;
+    border-color: rgba(0, 0, 0, 0.1) !important;
+    color: var(--text-secondary) !important;
+  }
+  .light-mode .copy-invite-btn:hover {
+    background-color: rgba(237, 102, 33, 0.1) !important;
+    border-color: rgba(237, 102, 33, 0.3) !important;
+    color: var(--ntv-orange) !important;
+  }
+
+  .light-mode .sidebar-user {
+    background-color: rgba(237, 102, 33, 0.04) !important;
+    border-color: rgba(237, 102, 33, 0.1) !important;
+  }
+
+  .light-mode .clock-wrapper {
+    background-color: rgba(0, 0, 0, 0.04) !important;
+  }
+
+  .light-mode .stats-box,
+  .light-mode .stat-card,
+  .light-mode .section-card,
+  .light-mode .main-control,
+  .light-mode .history-container,
+  .light-mode .tracker-card,
+  .light-mode .settings-card {
+    background-color: var(--card-bg) !important;
+    border-color: var(--border-subtle) !important;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.02) !important;
   }
 
   *,

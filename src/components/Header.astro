@@ -25,6 +25,12 @@ const { user } = Astro.props;
   </div>
   <div class="header-right">
     <div class="user-info">
+      <button type="button" id="theme-toggle" class="theme-toggle-btn" title="Toggle Theme" style="outline: none;">
+        <!-- Sun icon (shown in light mode) -->
+        <svg id="theme-sun-icon" class="theme-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="display: none;"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        <!-- Moon icon (shown in dark mode) -->
+        <svg id="theme-moon-icon" class="theme-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="display: none;"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
       {user?.picture && <img class="avatar" src={user.picture} alt={user.name} width="28" height="28" />}
       <span class="user-name">{user?.name?.split(' ')[0]}</span>
       <button type="button" id="logout-trigger" class="logout-btn" title="Sign out">
@@ -140,9 +146,43 @@ const { user } = Astro.props;
     cursor: pointer; transition: all 0.2s;
   }
   .btn-cancel:hover { background: rgba(255, 255, 255, 0.08); }
+
+  .theme-toggle-btn {
+    display: flex; align-items: center; justify-content: center;
+    width: 32px; height: 32px; border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-subtle);
+    color: var(--text-primary); cursor: pointer; transition: all 0.2s;
+    margin-right: 4px;
+  }
+  .theme-toggle-btn:hover { background: rgba(255, 255, 255, 0.08); transform: scale(1.05); }
 </style>
 
 <script>
+  // Theme Toggle Logic
+  const themeToggle = document.getElementById('theme-toggle');
+  const sunIcon = document.getElementById('theme-sun-icon');
+  const moonIcon = document.getElementById('theme-moon-icon');
+
+  function updateThemeIcons() {
+    const isLight = document.documentElement.classList.contains('light-mode');
+    if (isLight) {
+      if (sunIcon) sunIcon.style.display = 'block';
+      if (moonIcon) moonIcon.style.display = 'none';
+    } else {
+      if (sunIcon) sunIcon.style.display = 'none';
+      if (moonIcon) moonIcon.style.display = 'block';
+    }
+  }
+
+  // Initial set
+  updateThemeIcons();
+
+  themeToggle?.addEventListener('click', () => {
+    const isLight = document.documentElement.classList.toggle('light-mode');
+    localStorage.setItem('theme', isLight ? 'light' : 'dark');
+    updateThemeIcons();
+  });
+
   // Mobile Menu Logic
   document.getElementById('mobile-menu-toggle')?.addEventListener('click', () => {
     document.body.classList.toggle('sidebar-open');
