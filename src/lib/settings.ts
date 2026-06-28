@@ -15,6 +15,8 @@ export interface AppSettings {
   role: 'student' | 'coordinator';
   inviteCode?: string;
   coordinatorId?: string | null;
+  sectionId?: string | null;
+  sectionName?: string | null;
   userName?: string;
   userEmail?: string;
   userPicture?: string;
@@ -60,7 +62,7 @@ export async function getAppSettings(userId: string): Promise<AppSettings> {
   // Check Student table
   const { data: studentData } = await supabase
     .from('student_settings')
-    .select('*')
+    .select('*, coordinator_sections(section_name)')
     .eq('user_id', userId)
     .single();
 
@@ -79,6 +81,8 @@ export async function getAppSettings(userId: string): Promise<AppSettings> {
       paySchedule: studentData.pay_schedule,
       role: 'student',
       coordinatorId: studentData.coordinator_id,
+      sectionId: studentData.section_id,
+      sectionName: studentData.coordinator_sections?.section_name || null,
       userName: studentData.user_name,
       userEmail: studentData.user_email,
       userPicture: studentData.user_picture,
@@ -116,6 +120,7 @@ export async function saveAppSettings(userId: string, updated: Partial<AppSettin
         user_email: updated.userEmail,
         user_picture: updated.userPicture,
         coordinator_id: updated.coordinatorId,
+        section_id: updated.sectionId,
         start_date: updated.startDate || DEFAULT_SETTINGS.startDate,
         target_hours: updated.targetHours || DEFAULT_SETTINGS.targetHours,
         hourly_rate: updated.hourlyRate || DEFAULT_SETTINGS.hourlyRate,

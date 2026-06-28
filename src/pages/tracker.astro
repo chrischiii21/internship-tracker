@@ -51,8 +51,20 @@ const convert12to24 = (timeStr: string, ampm: string) => {
 if (Astro.request.method === 'POST') {
   const formData = await Astro.request.formData();
   const action = formData.get('action');
+  const isAjax = Astro.request.headers.get('X-Requested-With') === 'XMLHttpRequest';
 
-
+  const handleRedirect = (path: string, success?: string, error?: string) => {
+    if (isAjax) {
+      if (success) Astro.response.headers.set('X-Flash-Success', encodeURIComponent(success));
+      if (error) Astro.response.headers.set('X-Flash-Error', encodeURIComponent(error));
+      return;
+    }
+    const params = new URLSearchParams();
+    if (success) params.set('success', success);
+    if (error) params.set('error', error);
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return Astro.redirect(path + query);
+  };
 
   if (action === 'add') {
     const description = formData.get('description') as string;
@@ -71,9 +83,11 @@ if (Astro.request.method === 'POST') {
       await addManualEntry({ userId: user.id, description, date, startTime, endTime, documentationUrls });
       const { addSyncLog } = await import('../lib/logs');
       await addSyncLog({ userId: user.id, type: 'Mode', status: 'Success', details: `Manual entry added: ${description || 'No description'}` });
-      return Astro.redirect('/tracker?success=Manual entry added');
+      const redir = handleRedirect('/tracker', 'Manual entry added');
+      if (redir) return redir;
     } catch (e) {
-      return Astro.redirect(`/tracker?error=${encodeURIComponent(e.message)}`);
+      const redir = handleRedirect('/tracker', undefined, e.message);
+      if (redir) return redir;
     }
   }
 
@@ -95,18 +109,26 @@ if (Astro.request.method === 'POST') {
       await updateManualEntry(id, { description, date, startTime, endTime, documentationUrls });
       const { addSyncLog } = await import('../lib/logs');
       await addSyncLog({ userId: user.id, type: 'Mode', status: 'Success', details: `Entry updated: ${description || 'No description'}` });
-      return Astro.redirect('/tracker?success=Activity log updated');
+      const redir = handleRedirect('/tracker', 'Activity log updated');
+      if (redir) return redir;
     } catch (e) {
-      return Astro.redirect(`/tracker?error=${encodeURIComponent(e.message)}`);
+      const redir = handleRedirect('/tracker', undefined, e.message);
+      if (redir) return redir;
     }
   }
 
   if (action === 'delete') {
     const id = formData.get('id') as string;
-    await deleteManualEntry(id);
-    const { addSyncLog } = await import('../lib/logs');
-    await addSyncLog({ userId: user.id, type: 'Mode', status: 'Warning', details: 'Manual entry deleted' });
-    return Astro.redirect('/tracker?success=Activity log deleted');
+    try {
+      await deleteManualEntry(id);
+      const { addSyncLog } = await import('../lib/logs');
+      await addSyncLog({ userId: user.id, type: 'Mode', status: 'Warning', details: 'Manual entry deleted' });
+      const redir = handleRedirect('/tracker', 'Activity log deleted');
+      if (redir) return redir;
+    } catch (e) {
+      const redir = handleRedirect('/tracker', undefined, e.message);
+      if (redir) return redir;
+    }
   }
 }
 
@@ -687,6 +709,10 @@ const formatTo24hr = (timeStr: string) => {
           </div>
         </div>
       </div>
+      <form id="delete-form" method="POST" style="display: none;">
+        <input type="hidden" name="action" value="delete" />
+        <input type="hidden" name="id" id="delete-id-hidden" />
+      </form>
 
       <!-- AI Summary Modal -->
       <div id="ai-summary-modal" class="modal-overlay" style="display: none;">
@@ -990,9 +1016,8 @@ const formatTo24hr = (timeStr: string) => {
 
   window.confirmDelete = function() {
     if (!deleteTargetId) return;
-    document.getElementById('action-hidden').value = 'delete';
-    document.getElementById('id-hidden').value = deleteTargetId;
-    const form = document.getElementById('timer-main-form');
+    document.getElementById('delete-id-hidden').value = deleteTargetId;
+    const form = document.getElementById('delete-form');
     if (form) {
       if (typeof form.requestSubmit === 'function') {
         form.requestSubmit();
@@ -1017,30 +1042,45 @@ const formatTo24hr = (timeStr: string) => {
     }
   });
 
+  let originalInnerHTML = '';
   async function handleFormSubmit(form, event) {
-    const btn = form.querySelector('button[type="submit"]');
+    let btn = null;
+    if (event && event.submitter) {
+      btn = event.submitter;
+    } else if (form.id === 'delete-form') {
+      btn = document.querySelector('#delete-log-modal .btn-confirm-delete');
+    } else {
+      btn = form.querySelector('button[type="submit"]');
+    }
     
     if (btn) {
       btn.disabled = true;
       btn.style.opacity = '0.7';
+      originalInnerHTML = btn.innerHTML;
     }
 
     try {
-      const isEdit = form.classList.contains('edit-form');
-      const isAdd = form.classList.contains('side-form');
+      const actionVal = form.querySelector('input[name="action"]')?.value || '';
+      const isEdit = actionVal === 'edit' || form.classList.contains('edit-form');
+      const isAdd = actionVal === 'add' || form.classList.contains('side-form');
+      const isDelete = actionVal === 'delete' || form.id === 'delete-form';
       
       let uploadedUrls = [];
       if (isAdd || isEdit) {
         const localFiles = isEdit ? editSelectedFiles : addSelectedFiles;
         if (localFiles.length > 0) {
-          const originalText = btn.innerHTML;
-          btn.innerHTML = `
-            <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" style="display:inline-block; vertical-align:middle; width:16px; height:16px; animation: spin 1s linear infinite; margin-right: 8px;">
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" style="opacity: 0.25;"></circle>
-              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" style="opacity: 0.75;"></path>
-            </svg>
-            UPLOADING PROOF...
-          `;
+          if (btn) {
+            btn.innerHTML = `
+              <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" style="display:inline-block; vertical-align:middle; width:16px; height:16px; animation: spin 1s linear infinite; margin-right: 8px;">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" style="opacity: 0.25;"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" style="opacity: 0.75;"></path>
+              </svg>
+              UPLOADING PROOF...
+            `;
+          }
+          if (window.showLoadingSpinner) {
+            window.showLoadingSpinner('Uploading Proof...');
+          }
 
           const uploadFormData = new FormData();
           localFiles.forEach(file => {
@@ -1058,8 +1098,25 @@ const formatTo24hr = (timeStr: string) => {
           }
 
           uploadedUrls = await uploadRes.json();
-          btn.innerHTML = originalText;
         }
+      }
+
+      let loadingText = 'SAVING...';
+      if (isDelete) loadingText = 'DELETING ENTRY...';
+      else if (isAdd) loadingText = 'ADDING ENTRY...';
+      else if (isEdit) loadingText = 'SAVING CHANGES...';
+
+      if (btn) {
+        btn.innerHTML = `
+          <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" style="display:inline-block; vertical-align:middle; width:16px; height:16px; animation: spin 1s linear infinite; margin-right: 8px;">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" style="opacity: 0.25;"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" style="opacity: 0.75;"></path>
+          </svg>
+          ${loadingText}
+        `;
+      }
+      if (window.showLoadingSpinner) {
+        window.showLoadingSpinner(loadingText);
       }
 
       const formData = new FormData(form);
@@ -1080,6 +1137,9 @@ const formatTo24hr = (timeStr: string) => {
 
       const response = await fetch(window.location.pathname + window.location.search, {
         method: 'POST',
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest'
+        },
         body: formData
       });
 
@@ -1089,7 +1149,8 @@ const formatTo24hr = (timeStr: string) => {
 
       // Check if we were redirected to a completely different path (e.g., login page)
       const finalUrl = new URL(response.url);
-      if (finalUrl.pathname !== window.location.pathname) {
+      const normalizePath = (p) => p.replace(/\/$/, '') || '/';
+      if (normalizePath(finalUrl.pathname) !== normalizePath(window.location.pathname)) {
         window.location.href = response.url;
         return;
       }
@@ -1148,9 +1209,9 @@ const formatTo24hr = (timeStr: string) => {
 
 
 
-      // Show toast if success/error parameter is in the redirect URL
-      const successMsg = finalUrl.searchParams.get('success');
-      const errorMsg = finalUrl.searchParams.get('error');
+      // Show toast if success/error parameter is in the redirect URL or custom headers
+      const successMsg = response.headers.get('X-Flash-Success') || finalUrl.searchParams.get('success');
+      const errorMsg = response.headers.get('X-Flash-Error') || finalUrl.searchParams.get('error');
       if (successMsg) {
         window.showToast(decodeURIComponent(successMsg), 'success');
       } else if (errorMsg) {
@@ -1161,9 +1222,15 @@ const formatTo24hr = (timeStr: string) => {
       console.error(err);
       window.showToast('An error occurred. Please try again.', 'error');
     } finally {
+      if (window.hideLoadingSpinner) {
+        window.hideLoadingSpinner();
+      }
       if (btn) {
         btn.disabled = false;
         btn.style.opacity = '';
+        if (originalInnerHTML) {
+          btn.innerHTML = originalInnerHTML;
+        }
       }
     }
   }

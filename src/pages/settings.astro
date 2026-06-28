@@ -45,8 +45,14 @@ const isLinked = settings.role === 'student' && !!settings.coordinatorId;
 
       <div id="settings-content" class="content-center">
         <div class="page-header">
-          <h1>Settings</h1>
-          <p>Manage your account preferences and integration settings.</p>
+          <div>
+            <h1>Settings</h1>
+            <p>Manage your account preferences and integration settings.</p>
+          </div>
+          <button type="button" class="btn-guide" id="open-how-it-works-btn">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+            View Guide
+          </button>
         </div>
 
         <div class="settings-sections">
@@ -155,14 +161,20 @@ const isLinked = settings.role === 'student' && !!settings.coordinatorId;
                     <div class="linked-info">
                       <div class="link-status">
                         <div class="status-dot pulse"></div>
-                        <span>Linked to <strong>{coordinatorName}</strong></span>
+                        <span>Linked to <strong>{coordinatorName}</strong>{settings.sectionName && ` (${settings.sectionName})`}</span>
                       </div>
                       <p class="hint">Your coordinator can now view your progress and DTR logs.</p>
                       
-                      <button type="button" id="open-coordinator-unlink-modal" class="unlink-btn mt-16">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
-                        Unlink from Coordinator
-                      </button>
+                      <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                        <button type="button" id="open-coordinator-unlink-modal" class="unlink-btn mt-16">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+                          Unlink from Coordinator
+                        </button>
+                        <button type="button" class="btn-guide mt-16">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+                          View Guide: How it Works
+                        </button>
+                      </div>
                     </div>
                   </form>
                 ) : (
@@ -175,6 +187,10 @@ const isLinked = settings.role === 'student' && !!settings.coordinatorId;
                         <div class="status-dot gray"></div>
                         <span>Not linked to a coordinator</span>
                       </div>
+                      <button type="button" class="btn-guide mt-16">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+                        View Guide: How it Works
+                      </button>
                     </div>
 
                     <div class="form-group mt-16">
@@ -214,11 +230,14 @@ const isLinked = settings.role === 'student' && !!settings.coordinatorId;
             <section class="settings-card">
               <h2 class="card-title">Coordinator Settings</h2>
               <div class="detail-group">
-                <label>Your Invite Code</label>
+                <label>Your General Invite Code</label>
                 <div class="read-only-box" style="font-family: 'JetBrains Mono', monospace; font-size: 20px; font-weight: 700; color: var(--ntv-orange);">
                   {settings.inviteCode}
                 </div>
-                <p class="form-hint mt-8">Students can join your roster using this code during their setup.</p>
+                <p class="form-hint mt-8">
+                  This is your general invite code if you do not want to track students by sections.
+                  If you want to track students by section with unique codes, go to the <a href="/sections" class="hint-link">Manage Sections</a> tab.
+                </p>
               </div>
             </section>
           )}
@@ -350,6 +369,96 @@ const isLinked = settings.role === 'student' && !!settings.coordinatorId;
           </div>
         </div>
       </div>
+
+      <!-- HOW IT WORKS MODAL -->
+      {settings.role === 'coordinator' ? (
+        <div id="how-it-works-modal" class="modal-overlay">
+          <div class="modal-content info-modal-content">
+            <div class="modal-header-info">
+              <div class="info-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+              </div>
+              <h3>How Coordinator Portal Works</h3>
+            </div>
+            <p class="modal-subtitle">Welcome! Here is a quick guide on how to manage your students and monitor their progress.</p>
+            
+            <div class="guide-steps">
+              <div class="guide-step">
+                <span class="step-num">1</span>
+                <div class="step-details">
+                  <h4>Invite Students & Manage Sections</h4>
+                  <p>Provide your general invite code, or create distinct class sections under <strong>Sections & Invite Codes</strong> to generate unique section-specific invite codes for better student tracking.</p>
+                </div>
+              </div>
+              <div class="guide-step">
+                <span class="step-num">2</span>
+                <div class="step-details">
+                  <h4>Review Log Entries</h4>
+                  <p>Click on any student in the dashboard table to review their detailed log list, verify working hours, and check uploaded proof/documentation.</p>
+                </div>
+              </div>
+              <div class="guide-step">
+                <span class="step-num">3</span>
+                <div class="step-details">
+                  <h4>Monitor Targets</h4>
+                  <p>Track target hour progression, daily time records, and check if students are receiving allowances in their respective company areas.</p>
+                </div>
+              </div>
+            </div>
+            
+            <div class="modal-actions-single">
+              <button type="button" class="btn-onboarding" id="close-how-it-works-btn">Got it, let's start!</button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div id="how-it-works-modal" class="modal-overlay">
+          <div class="modal-content info-modal-content">
+            <div class="modal-header-info">
+              <div class="info-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+              </div>
+              <h3>How OJT Portal Works</h3>
+            </div>
+            <p class="modal-subtitle">Welcome! Here is a quick guide on how to track your hours and verify your progress.</p>
+            
+            <div class="guide-steps">
+              <div class="guide-step">
+                <span class="step-num">1</span>
+                <div class="step-details">
+                  <h4>Connect with Coordinator (Optional)</h4>
+                  <p>Linking with a coordinator is optional. If your coordinator reaches out, you can easily connect later in <strong>Settings</strong> using their invite code.</p>
+                </div>
+              </div>
+              <div class="guide-step">
+                <span class="step-num">2</span>
+                <div class="step-details">
+                  <h4>Track OJT Hours</h4>
+                  <p>Use the live <strong>Timer</strong> on the dashboard to track real-time activities, or log manual entries in the <strong>Tracker</strong> tab.</p>
+                </div>
+              </div>
+              <div class="guide-step">
+                <span class="step-num">3</span>
+                <div class="step-details">
+                  <h4>Upload Documentation</h4>
+                  <p>Always upload image proof (screenshots of work or activity photos) when adding/editing manual entries to ensure coordinator approval.</p>
+                </div>
+              </div>
+              <div class="guide-step">
+                <span class="step-num">4</span>
+                <div class="step-details">
+                  <h4>Monitor Allowances (Optional)</h4>
+                  <p>If your internship includes a stipend, you can enable and track your pending earnings and payouts in the <strong>Settings</strong> panel.</p>
+                </div>
+              </div>
+            </div>
+            
+            <div class="modal-actions-single">
+              <button type="button" class="btn-onboarding" id="close-how-it-works-btn">Got it, let's start!</button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   </div>
 </Layout>
@@ -427,6 +536,40 @@ const isLinked = settings.role === 'student' && !!settings.coordinatorId;
     }
   });
 
+  // How It Works Modal open/close trigger
+  const worksModal = document.getElementById('how-it-works-modal');
+  const closeWorksBtn = document.getElementById('close-how-it-works-btn');
+
+  // Open via the settings page "View Guide" button
+  document.getElementById('open-how-it-works-btn')?.addEventListener('click', () => {
+    if (worksModal) {
+      worksModal.classList.add('active');
+      document.body.style.overflow = 'hidden';
+    }
+  });
+
+  // Also bind legacy .btn-guide class (backward compat)
+  document.querySelectorAll('.btn-guide').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (worksModal) {
+        worksModal.classList.add('active');
+        document.body.style.overflow = 'hidden';
+      }
+    });
+  });
+
+  const closeWorks = () => {
+    if (worksModal) {
+      worksModal.classList.remove('active');
+      document.body.style.overflow = '';
+    }
+  };
+
+  closeWorksBtn?.addEventListener('click', closeWorks);
+  worksModal?.addEventListener('click', (e) => {
+    if (e.target === worksModal) closeWorks();
+  });
+
   // Check for success or error in URL
   const params = new URLSearchParams(window.location.search);
   const successVal = params.get('success');
@@ -441,6 +584,50 @@ const isLinked = settings.role === 'student' && !!settings.coordinatorId;
     const newUrl = window.location.pathname;
     window.history.replaceState({}, '', newUrl);
   }
+
+  // Handle visual loading state on form submissions
+  document.addEventListener('submit', (e) => {
+    const form = e.target;
+    if (form.dataset.submitting === 'true') return;
+    
+    const btn = e.submitter || form.querySelector('button[type="submit"]');
+    if (!btn) return;
+    
+    btn.disabled = true;
+    btn.style.opacity = '0.7';
+    
+    let loadingText = 'Loading...';
+    if (btn.classList.contains('save-btn')) {
+      loadingText = 'SAVING CONFIGURATION...';
+    } else if (btn.classList.contains('apply-btn')) {
+      loadingText = 'LINKING...';
+    } else if (btn.classList.contains('btn-confirm-delete')) {
+      if (form.action.includes('delete-account')) {
+        loadingText = 'DELETING ACCOUNT...';
+      } else {
+        loadingText = 'UNLINKING...';
+      }
+    } else {
+      const text = btn.innerText.trim().toUpperCase();
+      if (text) {
+        loadingText = text + '...';
+      }
+    }
+    
+    btn.innerHTML = `
+      <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" style="display:inline-block; vertical-align:middle; width:16px; height:16px; animation: spin 1s linear infinite; margin-right: 8px;">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" style="opacity: 0.25;"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" style="opacity: 0.75;"></path>
+      </svg>
+      ${loadingText}
+    `;
+    
+    if (window.showLoadingSpinner) {
+      window.showLoadingSpinner(loadingText);
+    }
+    
+    form.dataset.submitting = 'true';
+  });
 </script>
 
 <style>
@@ -451,10 +638,35 @@ const isLinked = settings.role === 'student' && !!settings.coordinatorId;
   
   #settings-content { position: relative; z-index: 1; max-width: 800px; animation: cin .5s cubic-bezier(.16,1,.3,1) both; }
   @keyframes cin { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
+  @keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
 
-  .page-header { margin-bottom: 32px; }
+  .page-header { margin-bottom: 32px; display: flex; justify-content: space-between; align-items: center; gap: 16px; }
   .page-header h1 { font-size: 28px; font-weight: 700; color: var(--text-primary); margin-bottom: 6px; }
   .page-header p { font-size: 14px; color: var(--text-secondary); }
+
+  .btn-guide {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(237, 102, 33, 0.1);
+    border: 1px solid rgba(237, 102, 33, 0.3);
+    color: var(--ntv-orange);
+    padding: 10px 18px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.2s;
+    flex-shrink: 0;
+  }
+  .btn-guide:hover {
+    background: var(--ntv-orange);
+    border-color: var(--ntv-orange);
+    color: #fff;
+    transform: translateY(-1px);
+  }
+
 
   .settings-sections { display: flex; flex-direction: column; gap: 24px; }
   .settings-card { 
@@ -578,5 +790,182 @@ const isLinked = settings.role === 'student' && !!settings.coordinatorId;
   @media (max-width: 480px) {
     .settings-card { padding: 20px; }
     .page-header h1 { font-size: 24px; }
+  }
+
+  /* Onboarding modal styles */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(5, 11, 22, 0.85);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+
+  /* Ensure the active class overrides default opacity globally */
+  :global(.modal-overlay.active) {
+    opacity: 1 !important;
+    pointer-events: auto !important;
+  }
+
+  .modal-content.info-modal-content {
+    background: #0d1421;
+    border: 1px solid rgba(237, 102, 33, 0.3);
+    border-radius: 20px;
+    width: 100%;
+    max-width: 440px;
+    padding: 32px;
+    opacity: 0;
+    transform: scale(0.95) translateY(10px);
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    position: relative;
+  }
+
+  /* Play entrance transition when overlay goes active */
+  :global(.modal-overlay.active) .info-modal-content {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+  @keyframes modalIn {
+    from { opacity: 0; transform: scale(0.95) translateY(10px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
+  }
+  .modal-header-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 8px;
+  }
+  .info-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--ntv-orange);
+  }
+  .modal-header-info h3 {
+    font-size: 18px;
+    font-weight: 700;
+    color: #fff;
+    margin: 0;
+  }
+  .modal-subtitle {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    margin: 0 0 24px 0;
+  }
+  .guide-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    margin-bottom: 28px;
+  }
+  .guide-step {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+  }
+  .step-num {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: rgba(237, 102, 33, 0.1);
+    color: var(--ntv-orange);
+    border: 1px solid rgba(237, 102, 33, 0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 800;
+    flex-shrink: 0;
+  }
+  .step-details h4 {
+    font-size: 14px;
+    font-weight: 600;
+    color: #fff;
+    margin-bottom: 4px;
+  }
+  .step-details p {
+    font-size: 12px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    margin: 0;
+  }
+  .modal-actions-single {
+    display: flex;
+    justify-content: flex-end;
+  }
+  .btn-onboarding {
+    width: auto;
+    padding: 10px 20px;
+    background: var(--ntv-gradient);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.2s;
+  }
+  .btn-onboarding:hover {
+    transform: translateY(-2px);
+    filter: brightness(1.1);
+  }
+
+  .btn-guide {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(237, 102, 33, 0.1);
+    border: 1px solid rgba(237, 102, 33, 0.3);
+    color: var(--ntv-orange);
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .btn-guide:hover {
+    background: var(--ntv-orange);
+    color: #fff;
+    border-color: var(--ntv-orange);
+    transform: translateY(-1px);
+  }
+
+  .btn-guide-secondary {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: transparent;
+    border: 1px solid var(--border-subtle);
+    color: var(--text-primary);
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 700;
+    text-decoration: none;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .btn-guide-secondary:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: var(--text-secondary);
+    color: #fff;
+    transform: translateY(-1px);
+  }
+
+  .hint-link {
+    color: var(--ntv-orange);
+    text-decoration: underline;
+    font-weight: 600;
+    transition: color 0.2s;
+  }
+  .hint-link:hover {
+    color: #fff;
   }
 </style>

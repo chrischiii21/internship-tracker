@@ -23,6 +23,16 @@ import Toaster from "../components/Toaster.astro";
   </head>
   <body>
     <div class="sidebar-overlay" id="global-overlay"></div>
+    
+    <!-- Full-Screen Loading Overlay -->
+    <div id="fullscreen-loading-overlay" class="loading-overlay">
+      <div class="premium-loader">
+        <div class="spinner-ring"></div>
+        <div class="spinner-glow"></div>
+      </div>
+      <span id="fullscreen-loading-text" class="loading-spinner-text">Processing...</span>
+    </div>
+
     <slot />
     <Toaster />
 
@@ -32,6 +42,26 @@ import Toaster from "../components/Toaster.astro";
         ?.addEventListener("click", () => {
           document.body.classList.remove("sidebar-open");
         });
+
+      window.showLoadingSpinner = function(text) {
+        const overlay = document.getElementById("fullscreen-loading-overlay");
+        const textEl = document.getElementById("fullscreen-loading-text");
+        if (overlay) {
+          if (textEl && text) {
+            textEl.textContent = text;
+          } else if (textEl) {
+            textEl.textContent = "Processing...";
+          }
+          overlay.classList.add("active");
+        }
+      };
+
+      window.hideLoadingSpinner = function() {
+        const overlay = document.getElementById("fullscreen-loading-overlay");
+        if (overlay) {
+          overlay.classList.remove("active");
+        }
+      };
     </script>
   </body>
 </html>
@@ -113,5 +143,143 @@ import Toaster from "../components/Toaster.astro";
       width: 100% !important;
       max-width: 100% !important;
     }
+  }
+
+  .loading-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(5, 11, 22, 0.82);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.3s;
+  }
+  .loading-overlay.active {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+  }
+  .premium-loader {
+    position: relative;
+    width: 64px;
+    height: 64px;
+    margin-bottom: 24px;
+  }
+  .spinner-ring {
+    position: absolute;
+    inset: 0;
+    border: 3px solid rgba(255, 255, 255, 0.05);
+    border-top: 3px solid #ed6621;
+    border-right: 3px solid #e61e2a;
+    border-radius: 50%;
+    animation: layoutSpin 1s cubic-bezier(0.5, 0.1, 0.4, 0.9) infinite;
+  }
+  .spinner-glow {
+    position: absolute;
+    inset: -4px;
+    border: 3px solid transparent;
+    border-top: 3px solid rgba(237, 102, 33, 0.35);
+    border-right: 3px solid rgba(230, 30, 42, 0.35);
+    border-radius: 50%;
+    filter: blur(4px);
+    animation: layoutSpin 1s cubic-bezier(0.5, 0.1, 0.4, 0.9) infinite;
+  }
+  .loading-spinner-text {
+    font-family: 'Outfit', sans-serif;
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    background: linear-gradient(135deg, #fff 0%, rgba(255, 255, 255, 0.7) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    text-shadow: 0 0 20px rgba(255, 255, 255, 0.15);
+    text-transform: uppercase;
+    animation: textPulse 1.5s ease-in-out infinite;
+  }
+  @keyframes layoutSpin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+  @keyframes textPulse {
+    0%, 100% { opacity: 0.6; transform: scale(0.98); }
+    50% { opacity: 1; transform: scale(1.02); }
+  }
+
+  /* Info / How it Works Modals */
+  .info-modal-content {
+    max-width: 580px !important;
+  }
+  .modal-subtitle {
+    color: var(--text-secondary);
+    font-size: 14px;
+    margin-bottom: 24px;
+    line-height: 1.5;
+  }
+  .modal-header-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .modal-header-info h3 {
+    font-size: 20px;
+    font-weight: 700;
+    color: #fff;
+  }
+  .info-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    background: rgba(96, 165, 250, 0.15);
+    border-radius: 10px;
+    color: #60a5fa;
+  }
+  .guide-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    margin-bottom: 28px;
+  }
+  .guide-step {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+  }
+  .step-num {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    background: var(--ntv-gradient);
+    border-radius: 50%;
+    color: #fff;
+    font-size: 13px;
+    font-weight: 800;
+    flex-shrink: 0;
+  }
+  .step-details h4 {
+    font-size: 15px;
+    font-weight: 600;
+    color: #fff;
+    margin-bottom: 4px;
+  }
+  .step-details p {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+  }
+  .modal-actions-single {
+    display: flex;
+    justify-content: flex-end;
   }
 </style>

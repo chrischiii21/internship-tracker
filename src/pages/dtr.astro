@@ -22,17 +22,49 @@ let viewUserId = user.id;
 
 // Coordinator Logic
 let students = [];
+let sections = [];
+let filteredStudents = [];
+const selectedSection = Astro.url.searchParams.get("section") || "all";
+
 if (mySettings.role === "coordinator") {
+  // Fetch coordinator sections
+  const { data: mySections } = await supabase
+    .from("coordinator_sections")
+    .select("*")
+    .eq("coordinator_id", user.id)
+    .order("section_name", { ascending: true });
+  sections = mySections || [];
+
+  // Fetch all students under coordinator, including section_id
   const { data: myStudents } = await supabase
     .from("student_settings")
-    .select("user_id, user_name")
+    .select("user_id, user_name, section_id")
     .eq("coordinator_id", user.id);
   students = myStudents || [];
 
+  // Apply section filtering
+  filteredStudents = students;
+  if (selectedSection !== "all") {
+    if (selectedSection === "unassigned") {
+      filteredStudents = students.filter(s => !s.section_id);
+    } else {
+      filteredStudents = students.filter(s => s.section_id === selectedSection);
+    }
+  }
+
+  // Determine current viewUserId based on filtered student list
   if (targetStudentId && students.some((s) => s.user_id === targetStudentId)) {
-    viewUserId = targetStudentId;
-  } else if (students.length > 0) {
-    viewUserId = students[0].user_id;
+    const isStudentInFiltered = selectedSection === 'all' || 
+      (selectedSection === 'unassigned' && !students.find(s => s.user_id === targetStudentId)?.section_id) ||
+      (students.find(s => s.user_id === targetStudentId)?.section_id === selectedSection);
+
+    if (isStudentInFiltered) {
+      viewUserId = targetStudentId;
+    } else if (filteredStudents.length > 0) {
+      viewUserId = filteredStudents[0].user_id;
+    }
+  } else if (filteredStudents.length > 0) {
+    viewUserId = filteredStudents[0].user_id;
   }
 }
 
@@ -135,18 +167,37 @@ const needsUpdate =
       <div class="no-print actions-bar">
         <div class="month-selector">
           {
-            mySettings.role === "coordinator" && students.length > 0 && (
-              <select
-                id="student-selector"
-                class="dtr-select"
-                style="margin-right: 12px;"
-              >
-                {students.map((s) => (
-                  <option value={s.user_id} selected={s.user_id === viewUserId}>
-                    {s.user_name}
-                  </option>
-                ))}
-              </select>
+            mySettings.role === "coordinator" && (
+              <>
+                <select
+                  id="section-selector"
+                  class="dtr-select"
+                >
+                  <option value="all" selected={selectedSection === 'all'}>All Sections</option>
+                  <option value="unassigned" selected={selectedSection === 'unassigned'}>General / Unassigned</option>
+                  {sections.map((sec) => (
+                    <option value={sec.id} selected={sec.id === selectedSection}>
+                      {sec.section_name}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  id="student-selector"
+                  class="dtr-select"
+                  disabled={filteredStudents.length === 0}
+                >
+                  {filteredStudents.length > 0 ? (
+                    filteredStudents.map((s) => (
+                      <option value={s.user_id} selected={s.user_id === viewUserId}>
+                        {s.user_name}
+                      </option>
+                    ))
+                  ) : (
+                    <option value="">No students in section</option>
+                  )}
+                </select>
+              </>
             )
           }
           <select id="month-selector" class="dtr-select">
@@ -312,16 +363,23 @@ const needsUpdate =
 <script>
   import html2pdf from 'html2pdf.js/dist/html2pdf.min.js';
 
+  const secSel = document.getElementById("section-selector");
   const sSel = document.getElementById("student-selector");
   const mSel = document.getElementById("month-selector");
   const ySel = document.getElementById("year-selector");
 
-  const update = () => {
+  const update = (e) => {
     let url = `/dtr?month=${mSel.value}&year=${ySel.value}`;
-    if (sSel?.value) url += `&studentId=${sSel.value}`;
+    if (secSel?.value) url += `&section=${secSel.value}`;
+    
+    // Only pass studentId if the change didn't trigger from the section selector itself
+    if (e?.target !== secSel && sSel?.value) {
+      url += `&studentId=${sSel.value}`;
+    }
     window.location.href = url;
   };
 
+  secSel?.addEventListener("change", update);
   sSel?.addEventListener("change", update);
   mSel?.addEventListener("change", update);
   ySel?.addEventListener("change", update);
@@ -442,19 +500,41 @@ const needsUpdate =
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 24px;
+    gap: 12px;
+    margin-bottom: 28px;
     max-width: 800px;
     margin-left: auto;
     margin-right: auto;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--border-subtle);
+    padding: 12px 16px;
+    border-radius: 14px;
+  }
+  .month-selector {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: nowrap;
+    flex: 1;
+    min-width: 0;
   }
   .dtr-select {
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid var(--border-subtle);
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
     color: white;
-    padding: 8px 12px;
-    border-radius: 6px;
+    padding: 8px 10px;
+    border-radius: 8px;
     outline: none;
-    font-size: 14px;
+    font-size: 13px;
+    font-weight: 500;
+    transition: 0.2s;
+    cursor: pointer;
+    min-width: 0;
+    flex-shrink: 1;
+  }
+  .dtr-select:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(237, 102, 33, 0.3);
   }
   .dtr-select option {
     background: #111827;
@@ -468,8 +548,8 @@ const needsUpdate =
     display: flex;
     align-items: center;
     gap: 8px;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid var(--border-subtle);
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
     color: white;
     padding: 10px 18px;
     border-radius: 8px;
@@ -478,7 +558,7 @@ const needsUpdate =
     transition: 0.2s;
   }
   .print-btn:hover {
-    background: rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.06);
     border-color: rgba(255, 255, 255, 0.2);
     transform: translateY(-1px);
   }
@@ -701,15 +781,6 @@ const needsUpdate =
       border-width: 2px;
     }
     .dtr-table td {
-      padding: 2px 8px;
-      font-size: 11px;
-      height: 17px;
-      border-width: 1px;
-      border-color: #000;
-    }
-    .date-col,
-    .total-col {
-      border-width: 2px;
     }
 
     .dtr-footer {
@@ -734,6 +805,32 @@ const needsUpdate =
       margin-top: 15px;
       margin-bottom: 10px;
       font-size: 12px;
+    }
+  }
+
+  @media (max-width: 768px) {
+    .actions-bar {
+      flex-direction: column !important;
+      align-items: stretch !important;
+      gap: 12px !important;
+      padding: 12px !important;
+    }
+    .month-selector {
+      flex-direction: column !important;
+      align-items: stretch !important;
+      width: 100% !important;
+      gap: 8px !important;
+    }
+    .month-selector .dtr-select {
+      width: 100% !important;
+    }
+    .actions-group {
+      justify-content: space-between !important;
+      width: 100% !important;
+    }
+    .print-btn, .download-btn {
+      flex: 1 !important;
+      justify-content: center !important;
     }
   }
 </style>

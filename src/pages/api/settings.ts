@@ -53,23 +53,40 @@ export const POST: APIRoute = async ({ request }) => {
     const paySchedule = (formData.get('paySchedule') as 'weekly' | 'semi-monthly' | 'monthly') || existingSettings.paySchedule;
 
     let coordinatorId = existingSettings.coordinatorId;
+    let sectionId = existingSettings.sectionId;
     const isUnlink = formData.get('unlink') === 'true';
 
     if (isUnlink) {
       coordinatorId = null as any;
+      sectionId = null as any;
     } else if (role === 'student' && coordinatorInvite) {
-      // Find coordinator by invite code
+      // Find coordinator/section by invite code
       const { supabase } = await import('../../lib/supabase');
-      const { data: coord } = await supabase
-        .from('coordinator_settings')
-        .select('user_id')
-        .eq('invite_code', coordinatorInvite.toUpperCase().trim())
-        .single();
       
-      if (coord) {
-        coordinatorId = coord.user_id;
+      // 1. Try to find the invite code in coordinator_sections first
+      const { data: section } = await supabase
+        .from('coordinator_sections')
+        .select('id, coordinator_id')
+        .eq('invite_code', coordinatorInvite.toUpperCase().trim())
+        .maybeSingle();
+      
+      if (section) {
+        coordinatorId = section.coordinator_id;
+        sectionId = section.id;
       } else {
-        throw new Error('Invalid invite code. Please check with your coordinator.');
+        // 2. Try to find the invite code in coordinator_settings as a fallback (general code)
+        const { data: coord } = await supabase
+          .from('coordinator_settings')
+          .select('user_id')
+          .eq('invite_code', coordinatorInvite.toUpperCase().trim())
+          .maybeSingle();
+        
+        if (coord) {
+          coordinatorId = coord.user_id;
+          sectionId = null;
+        } else {
+          throw new Error('Invalid invite code. Please check with your coordinator.');
+        }
       }
     }
 
@@ -102,6 +119,7 @@ export const POST: APIRoute = async ({ request }) => {
       role,
       inviteCode: role === 'coordinator' ? ((inviteCode || existingSettings.inviteCode)?.toUpperCase()) : undefined,
       coordinatorId,
+      sectionId,
       clockifyEnabled,
       userName: session.name,
       userEmail: session.email,
