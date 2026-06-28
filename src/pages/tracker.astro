@@ -468,7 +468,7 @@ const formatTo24hr = (timeStr: string) => {
                                         data-entries={JSON.stringify(dateGroup.entries.map(e => ({ date: e.date, description: e.description, durationSeconds: e.durationSeconds })))}
                                       >
                                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                                          <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
+                                          <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1 1.275-1.275L12 3Z"/>
                                         </svg>
                                       </button>
                                     </div>
@@ -484,51 +484,35 @@ const formatTo24hr = (timeStr: string) => {
                                                 {entry.type === 'clockify' ? 'Clockify' : 'Manual'}
                                               </span>
                                             )}
+                                            {entry.documentationUrls && entry.documentationUrls.length > 0 && (
+                                              <span class="proof-badge" title={`${entry.documentationUrls.length} image proof files attached`}>
+                                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-right: 4px; display: inline-block; vertical-align: middle;"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                                                {entry.documentationUrls.length}
+                                              </span>
+                                            )}
                                           </div>
                                           <div class="shift-sub">
                                             <span class="time">{formatTo24hr(entry.startTime)} — {formatTo24hr(entry.endTime)}</span>
                                           </div>
-                                          {entry.documentationUrls && entry.documentationUrls.length > 0 && (
-                                            <div class="entry-doc-preview">
-                                              {entry.documentationUrls.map(url => (
-                                                <div class="doc-thumb-container">
-                                                  <a href={url} target="_blank" class="doc-thumb-link" title="View documentation">
-                                                    <img src={url} alt="Proof" class="doc-thumb" />
-                                                  </a>
-                                                  <a href={`/api/download?url=${encodeURIComponent(url)}`} class="doc-download-btn" title="Download proof">
-                                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                                                  </a>
-                                                </div>
-                                              ))}
-                                            </div>
-                                          )}
                                         </div>
                                         <div class="shift-actions">
                                           <span class="shift-hours">{formatHours(entry.durationSeconds / 3600)}</span>
-                                          {entry.type === 'manual' ? (
-                                            <div class="action-group">
-                                              <button 
-                                                class="edit-icon" 
-                                                title="Edit Entry"
-                                                onclick={`window.openEditModal('${entry.id}', '${entry.description.replace(/'/g, "\\'")}', '${entry.date}', '${entry.startTime}', '${entry.endTime}', ${JSON.stringify(entry.documentationUrls)})`}
-                                              >
-                                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                                              </button>
-                                              <button 
-                                                type="button"
-                                                class="delete-icon" 
-                                                onclick={`window.openDeleteModal('${entry.id}')`}
-                                              >
-                                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                                              </button>
-                                            </div>
-                                          ) : (
-                                            <div class="action-group read-only" title="Synced from Clockify">
-                                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="sync-lock-icon">
-                                                <path d="M21 12a9 9 0 0 1-9 9m9-9a9 9 0 0 0-9-9m9 9H3m9 9a9 9 0 0 1-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"/>
-                                              </svg>
-                                            </div>
-                                          )}
+                                          <div class="action-group">
+                                            <button 
+                                              type="button" 
+                                              class="info-icon-btn" 
+                                              title="View Details & Proof"
+                                              data-id={entry.id}
+                                              data-desc={entry.description || 'General Work'}
+                                              data-date={entry.date}
+                                              data-start={entry.startTime}
+                                              data-end={entry.endTime}
+                                              data-urls={JSON.stringify(entry.documentationUrls || [])}
+                                              data-type={entry.type}
+                                            >
+                                              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+                                            </button>
+                                          </div>
                                         </div>
                                       </div>
                                     ))}
@@ -639,7 +623,7 @@ const formatTo24hr = (timeStr: string) => {
         <div class="modal-content">
           <div class="modal-header">
             <h3>Edit Activity Log</h3>
-            <button class="close-btn" onclick="document.getElementById('edit-modal').style.display='none'">
+            <button type="button" class="close-btn" onclick="window.cancelEditModal()">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
             </button>
           </div>
@@ -687,7 +671,7 @@ const formatTo24hr = (timeStr: string) => {
             </div>
 
             <div class="modal-actions">
-              <button type="button" class="btn-cancel" onclick="document.getElementById('edit-modal').style.display='none'">Cancel</button>
+              <button type="button" class="btn-cancel" onclick="window.cancelEditModal()">Cancel</button>
               <button type="submit" class="btn-save">Save Changes</button>
             </div>
           </form>
@@ -705,7 +689,7 @@ const formatTo24hr = (timeStr: string) => {
           <p class="modal-desc">Are you sure you want to delete this record? This action cannot be undone.</p>
           <div class="modal-actions-stacked">
             <button type="button" class="btn-confirm-delete" onclick="window.confirmDelete()">Yes, Delete Log</button>
-            <button type="button" class="btn-cancel" onclick="document.getElementById('delete-log-modal').style.display='none'">Cancel</button>
+            <button type="button" class="btn-cancel" onclick="window.cancelDeleteModal()">Cancel</button>
           </div>
         </div>
       </div>
@@ -749,6 +733,102 @@ const formatTo24hr = (timeStr: string) => {
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
               Copy Suggestion
             </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ENTRY DETAILS & GALLERY MODAL -->
+      <div id="entry-details-modal" class="modal-overlay" style="display: none; z-index: 3000;">
+        <div class="modal-content details-modal-content">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-shrink: 0; border-bottom: 1px solid var(--border-subtle); padding-bottom: 12px;">
+            <h3 style="font-size: 18px; font-weight: 700; color: #fff; margin: 0;">Activity Details & Proof</h3>
+            <button type="button" id="close-entry-details-btn" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 4px; border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: color 0.2s;">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+
+          <!-- Modal Body Columns -->
+          <div class="details-modal-grid">
+            
+            <!-- Left Side: Entry Information -->
+            <div class="details-info-side">
+              <div style="display: flex; flex-direction: column; gap: 18px;">
+                <div>
+                  <label style="display: block; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); margin-bottom: 6px;">Activity Description</label>
+                  <div id="details-desc" style="font-size: 15px; font-weight: 600; color: #fff; line-height: 1.5; word-break: break-word;"></div>
+                </div>
+                
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                  <div>
+                    <label style="display: block; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); margin-bottom: 6px;">Date</label>
+                    <div id="details-date" style="font-size: 13px; color: var(--text-primary); font-weight: 500;"></div>
+                  </div>
+                  <div>
+                    <label style="display: block; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); margin-bottom: 6px;">Logged Hours</label>
+                    <div id="details-hours" style="font-size: 13px; color: var(--text-primary); font-weight: 500;"></div>
+                  </div>
+                </div>
+
+                <div>
+                  <label style="display: block; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); margin-bottom: 6px;">Time Duration</label>
+                  <div id="details-time" style="font-size: 13px; color: var(--text-primary); font-weight: 500;"></div>
+                </div>
+
+                <div>
+                  <label style="display: block; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); margin-bottom: 6px;">Log Source</label>
+                  <div id="details-source-badge-container"></div>
+                </div>
+              </div>
+
+              <!-- Actions Footer (only for manual entries) -->
+              <div id="details-actions" style="margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--border-subtle); display: flex; flex-direction: column; gap: 10px;">
+                <button type="button" id="details-edit-btn" class="details-btn-edit">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-right: 6px;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                  Edit Log Details
+                </button>
+                <button type="button" id="details-delete-btn" class="details-btn-delete">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-right: 4px;"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                  Delete Log Entry
+                </button>
+              </div>
+            </div>
+
+            <!-- Right Side: Gallery / Attachment Section -->
+            <div class="details-gallery-side">
+              <!-- Gallery counter -->
+              <div id="details-gallery-counter" style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px; flex-shrink: 0; display: none;"></div>
+
+              <!-- Main image viewer -->
+              <div style="flex: 1; overflow: hidden; border-radius: 12px; background: rgba(0,0,0,0.4); border: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: center; min-height: 250px; position: relative;">
+                <img id="details-gallery-img" src="" alt="Documentation proof" style="max-width: 100%; max-height: 55vh; object-fit: contain; border-radius: 8px; display: block;" />
+                <div id="details-gallery-no-preview" style="display: none; text-align: center; padding: 40px;">
+                  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="1.5" style="margin-bottom: 12px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                  <p style="color: var(--text-secondary); font-size: 13px; margin: 0 0 12px 0;">This file cannot be previewed</p>
+                  <a id="details-gallery-open-link" href="#" target="_blank" rel="noopener" style="color: var(--ntv-orange); font-size: 13px; font-weight: 600;">Open in new tab →</a>
+                </div>
+                
+                <div id="details-gallery-empty" style="display: none; text-align: center; padding: 40px;">
+                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="1.5" style="margin-bottom: 12px;"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M20.4 20.4L15 13l-4 5-3-3-4.4 5.4"/></svg>
+                  <p style="color: var(--text-secondary); font-size: 13px; margin: 0;">No documentation proof uploaded for this entry.</p>
+                </div>
+              </div>
+
+              <!-- Thumbnail strip (shown when multiple docs) -->
+              <div id="details-gallery-thumbs" style="display: none; gap: 8px; margin-top: 12px; overflow-x: auto; flex-shrink: 0; padding-bottom: 4px;"></div>
+
+              <!-- Navigation -->
+              <div id="details-gallery-nav" style="display: none; justify-content: center; align-items: center; gap: 16px; margin-top: 14px; flex-shrink: 0;">
+                <button id="details-prev-btn" type="button" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 8px 18px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; transition: all 0.2s;">← Prev</button>
+                <span id="details-nav-label" style="font-size: 12px; color: var(--text-secondary);"></span>
+                <button id="details-next-btn" type="button" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 8px 18px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; transition: all 0.2s;">Next →</button>
+              </div>
+
+              <!-- Open in new tab link -->
+              <div id="details-gallery-external-container" style="text-align: center; margin-top: 10px; flex-shrink: 0; display: none;">
+                <a id="details-gallery-external" href="#" target="_blank" rel="noopener" style="font-size: 11px; color: var(--text-secondary); text-decoration: underline;">Open current file in new tab</a>
+              </div>
+            </div>
+
           </div>
         </div>
       </div>
@@ -1206,6 +1286,9 @@ const formatTo24hr = (timeStr: string) => {
       if (editModal) editModal.style.display = 'none';
       const deleteModal = document.getElementById('delete-log-modal');
       if (deleteModal) deleteModal.style.display = 'none';
+      
+      // Clear details args on successful edit/delete
+      lastOpenedDetailsArgs = null;
 
 
 
@@ -1417,6 +1500,265 @@ const formatTo24hr = (timeStr: string) => {
       }
     });
   }
+
+  // Entry Details & Gallery Modal Setup
+  let lastOpenedDetailsArgs = null;
+  const entryDetailsModal = document.getElementById('entry-details-modal');
+  const detailsCloseBtn = document.getElementById('close-entry-details-btn');
+  const detailsDesc = document.getElementById('details-desc');
+  const detailsDate = document.getElementById('details-date');
+  const detailsHours = document.getElementById('details-hours');
+  const detailsTime = document.getElementById('details-time');
+  const detailsSourceContainer = document.getElementById('details-source-badge-container');
+  const detailsActions = document.getElementById('details-actions');
+  const detailsEditBtn = document.getElementById('details-edit-btn');
+  const detailsDeleteBtn = document.getElementById('details-delete-btn');
+
+  // Gallery Elements inside Details Modal
+  const detailsImg = document.getElementById('details-gallery-img');
+  const detailsNoPreview = document.getElementById('details-gallery-no-preview');
+  const detailsOpenLink = document.getElementById('details-gallery-open-link');
+  const detailsEmpty = document.getElementById('details-gallery-empty');
+  const detailsCounter = document.getElementById('details-gallery-counter');
+  const detailsThumbsEl = document.getElementById('details-gallery-thumbs');
+  const detailsNavEl = document.getElementById('details-gallery-nav');
+  const detailsNavLabel = document.getElementById('details-nav-label');
+  const detailsPrevBtn = document.getElementById('details-prev-btn');
+  const detailsNextBtn = document.getElementById('details-next-btn');
+  const detailsExternalContainer = document.getElementById('details-gallery-external-container');
+  const detailsExternal = document.getElementById('details-gallery-external');
+
+  let detailsUrls = [];
+  let detailsIndex = 0;
+
+  const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'];
+  function isImage(url) {
+    const ext = url.split('?')[0].split('.').pop().toLowerCase();
+    return IMAGE_EXTS.includes(ext);
+  }
+
+  function loadDetailsDocAtIndex(idx) {
+    detailsIndex = idx;
+    const url = detailsUrls[idx];
+    if (detailsExternal) detailsExternal.href = url;
+    if (isImage(url)) {
+      if (detailsImg) {
+        detailsImg.src = url;
+        detailsImg.style.display = 'block';
+      }
+      if (detailsNoPreview) detailsNoPreview.style.display = 'none';
+    } else {
+      if (detailsImg) detailsImg.style.display = 'none';
+      if (detailsOpenLink) detailsOpenLink.href = url;
+      if (detailsNoPreview) {
+        detailsNoPreview.style.display = 'flex';
+        detailsNoPreview.style.flexDirection = 'column';
+        detailsNoPreview.style.alignItems = 'center';
+      }
+    }
+    // Update nav label
+    if (detailsUrls.length > 1) {
+      if (detailsNavLabel) detailsNavLabel.textContent = `${idx + 1} of ${detailsUrls.length}`;
+      if (detailsCounter) detailsCounter.textContent = `Showing ${idx + 1} of ${detailsUrls.length} files`;
+      // Highlight active thumb
+      if (detailsThumbsEl) {
+        detailsThumbsEl.querySelectorAll('.gallery-thumb').forEach((t, i) => {
+          t.style.borderColor = i === idx ? 'var(--ntv-orange)' : 'rgba(255,255,255,0.1)';
+          t.style.opacity = i === idx ? '1' : '0.5';
+        });
+      }
+    }
+  }
+
+  // Helper: Format Date to readable format e.g. June 25, 2026
+  function formatReadableDate(dateStr) {
+    if (!dateStr) return '';
+    try {
+      const date = new Date(dateStr);
+      return date.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+    } catch (e) {
+      return dateStr;
+    }
+  }
+
+  window.openEntryDetailsModal = function(id, desc, date, start, end, docUrls, type) {
+    if (detailsDesc) detailsDesc.innerText = desc || 'General Work';
+    if (detailsDate) detailsDate.innerText = formatReadableDate(date);
+    if (detailsTime) detailsTime.innerText = `${start} — ${end}`;
+    
+    // Parse docUrls
+    let urls = [];
+    if (docUrls) {
+      urls = Array.isArray(docUrls) ? docUrls : JSON.parse(docUrls);
+    }
+    detailsUrls = urls;
+    detailsIndex = 0;
+
+    // Save details args for cancel restoration
+    lastOpenedDetailsArgs = { id, desc, date, start, end, docUrls: urls, type };
+
+    // Log source badge
+    if (detailsSourceContainer) {
+      const badgeClass = type === 'clockify' ? 'source-badge clockify' : 'source-badge manual';
+      const badgeText = type === 'clockify' ? 'Clockify' : 'Manual';
+      detailsSourceContainer.innerHTML = `<span class="${badgeClass}" style="font-size: 11px; padding: 4px 8px; font-weight: 700; text-transform: uppercase;">${badgeText}</span>`;
+    }
+
+    // Calculate duration in hours
+    try {
+      const parseTime = (t) => {
+        const parts = t.split(':');
+        return parseInt(parts[0], 10) * 3600 + parseInt(parts[1] || '0', 10) * 60 + parseInt(parts[2] || '0', 10);
+      };
+      const seconds = Math.abs(parseTime(end) - parseTime(start));
+      const hoursDecimal = seconds / 3600;
+      if (detailsHours) detailsHours.innerText = `${hoursDecimal.toFixed(2)} hrs`;
+    } catch (e) {
+      if (detailsHours) detailsHours.innerText = '—';
+    }
+
+    // Set up Actions (Edit/Delete)
+    if (type === 'manual') {
+      if (detailsActions) detailsActions.style.display = 'flex';
+      
+      // Setup dynamic click behavior
+      if (detailsEditBtn) {
+        detailsEditBtn.onclick = function() {
+          closeEntryDetails(true); // Keep args for restoration
+          window.openEditModal(id, desc, date, start, end, JSON.stringify(urls));
+        };
+      }
+      if (detailsDeleteBtn) {
+        detailsDeleteBtn.onclick = function() {
+          closeEntryDetails(true); // Keep args for restoration
+          window.openDeleteModal(id);
+        };
+      }
+    } else {
+      if (detailsActions) detailsActions.style.display = 'none';
+    }
+
+    // Setup Gallery side
+    if (urls.length > 0) {
+      if (detailsImg) detailsImg.style.display = 'block';
+      if (detailsEmpty) detailsEmpty.style.display = 'none';
+      if (detailsExternalContainer) detailsExternalContainer.style.display = 'block';
+      
+      // Thumbnails strip
+      if (detailsThumbsEl) detailsThumbsEl.innerHTML = '';
+      if (urls.length > 1) {
+        if (detailsThumbsEl) detailsThumbsEl.style.display = 'flex';
+        if (detailsNavEl) detailsNavEl.style.display = 'flex';
+        if (detailsCounter) detailsCounter.style.display = 'block';
+        urls.forEach((url, i) => {
+          const thumb = document.createElement('button');
+          thumb.type = 'button';
+          thumb.className = 'gallery-thumb';
+          thumb.style.cssText = 'flex-shrink:0;width:64px;height:64px;border-radius:8px;border:2px solid rgba(255,255,255,0.1);background:rgba(0,0,0,0.3);overflow:hidden;cursor:pointer;padding:0;transition:all 0.2s;';
+          if (isImage(url)) {
+            const tImg = document.createElement('img');
+            tImg.src = url;
+            tImg.style.cssText = 'width:100%;height:100%;object-fit:cover;';
+            thumb.appendChild(tImg);
+          } else {
+            thumb.innerHTML = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="1.5" style="margin:auto;display:block;margin-top:20px"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+          }
+          thumb.addEventListener('click', () => loadDetailsDocAtIndex(i));
+          if (detailsThumbsEl) detailsThumbsEl.appendChild(thumb);
+        });
+      } else {
+        if (detailsThumbsEl) detailsThumbsEl.style.display = 'none';
+        if (detailsNavEl) detailsNavEl.style.display = 'none';
+        if (detailsCounter) detailsCounter.style.display = 'none';
+      }
+
+      loadDetailsDocAtIndex(0);
+    } else {
+      // Empty attachments state
+      if (detailsImg) detailsImg.style.display = 'none';
+      if (detailsNoPreview) detailsNoPreview.style.display = 'none';
+      if (detailsEmpty) detailsEmpty.style.display = 'block';
+      if (detailsThumbsEl) detailsThumbsEl.style.display = 'none';
+      if (detailsNavEl) detailsNavEl.style.display = 'none';
+      if (detailsCounter) detailsCounter.style.display = 'none';
+      if (detailsExternalContainer) detailsExternalContainer.style.display = 'none';
+    }
+
+    if (entryDetailsModal) {
+      entryDetailsModal.style.display = 'flex';
+      document.body.style.overflow = 'hidden';
+    }
+  }
+
+  const closeEntryDetails = (keepArgs = false) => {
+    if (entryDetailsModal) {
+      entryDetailsModal.style.display = 'none';
+      document.body.style.overflow = '';
+      if (!keepArgs) {
+        lastOpenedDetailsArgs = null;
+      }
+    }
+  };
+
+  detailsCloseBtn?.addEventListener('click', () => closeEntryDetails(false));
+  entryDetailsModal?.addEventListener('click', (e) => { if (e.target === entryDetailsModal) closeEntryDetails(false); });
+  detailsPrevBtn?.addEventListener('click', () => { if (detailsIndex > 0) loadDetailsDocAtIndex(detailsIndex - 1); });
+  detailsNextBtn?.addEventListener('click', () => { if (detailsIndex < detailsUrls.length - 1) loadDetailsDocAtIndex(detailsIndex + 1); });
+
+  window.cancelEditModal = function() {
+    const modal = document.getElementById('edit-modal');
+    if (modal) modal.style.display = 'none';
+    
+    if (lastOpenedDetailsArgs) {
+      window.openEntryDetailsModal(
+        lastOpenedDetailsArgs.id,
+        lastOpenedDetailsArgs.desc,
+        lastOpenedDetailsArgs.date,
+        lastOpenedDetailsArgs.start,
+        lastOpenedDetailsArgs.end,
+        lastOpenedDetailsArgs.docUrls,
+        lastOpenedDetailsArgs.type
+      );
+    } else {
+      document.body.style.overflow = '';
+    }
+  };
+
+  window.cancelDeleteModal = function() {
+    const modal = document.getElementById('delete-log-modal');
+    if (modal) modal.style.display = 'none';
+    
+    if (lastOpenedDetailsArgs) {
+      window.openEntryDetailsModal(
+        lastOpenedDetailsArgs.id,
+        lastOpenedDetailsArgs.desc,
+        lastOpenedDetailsArgs.date,
+        lastOpenedDetailsArgs.start,
+        lastOpenedDetailsArgs.end,
+        lastOpenedDetailsArgs.docUrls,
+        lastOpenedDetailsArgs.type
+      );
+    } else {
+      document.body.style.overflow = '';
+    }
+  };
+
+  // Delegated click for entry info details button
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.info-icon-btn');
+    if (!btn) return;
+    e.stopPropagation();
+    
+    const id = btn.dataset.id;
+    const desc = btn.dataset.desc;
+    const date = btn.dataset.date;
+    const start = btn.dataset.start;
+    const end = btn.dataset.end;
+    const urls = JSON.parse(btn.dataset.urls || '[]');
+    const type = btn.dataset.type;
+    
+    window.openEntryDetailsModal(id, desc, date, start, end, urls, type);
+  });
 </script>
 
 <style>
@@ -1914,11 +2256,108 @@ const formatTo24hr = (timeStr: string) => {
   .action-group { display: flex; align-items: center; gap: 8px; }
   .log-hours { font-size: 16px; font-weight: 700; color: var(--ntv-orange); font-family: 'JetBrains Mono', monospace; }
   
-  .delete-icon, .edit-icon { background: none; border: none; cursor: pointer; opacity: 0.4; transition: 0.2s; padding: 4px; display: flex; align-items: center; }
+  .delete-icon, .edit-icon, :global(.info-icon-btn) { background: none; border: none; cursor: pointer; opacity: 0.4; transition: 0.2s; padding: 4px; display: flex; align-items: center; }
   .delete-icon { color: #f87171; }
-  .edit-icon { color: var(--text-secondary); }
-  .delete-icon:hover, .edit-icon:hover { opacity: 1; transform: scale(1.1); }
-  .edit-icon:hover { color: var(--ntv-orange); }
+  .edit-icon, :global(.info-icon-btn) { color: var(--text-secondary); }
+  .delete-icon:hover, .edit-icon:hover, :global(.info-icon-btn:hover) { opacity: 1; transform: scale(1.1); }
+  .edit-icon:hover, :global(.info-icon-btn:hover) { color: var(--ntv-orange); }
+
+  .proof-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(237, 102, 33, 0.06);
+    border: 1px solid rgba(237, 102, 33, 0.25);
+    color: var(--ntv-orange);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    margin-left: 8px;
+    vertical-align: middle;
+  }
+
+  /* Details Modal Styles */
+  .details-modal-content {
+    max-width: 900px;
+    width: 100%;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    padding: 28px;
+    background: #0a1020;
+    border: 1px solid rgba(237, 102, 33, 0.3);
+    border-radius: 20px;
+  }
+  .details-modal-grid {
+    display: flex;
+    gap: 28px;
+    flex: 1;
+    overflow: hidden;
+  }
+  .details-info-side {
+    width: 320px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    border-right: 1px solid var(--border-subtle);
+    padding-right: 24px;
+    overflow-y: auto;
+  }
+  .details-gallery-side {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* Details Modal Custom Action Buttons */
+  .details-btn-edit {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: rgba(237, 102, 33, 0.08);
+    border: 1px solid rgba(237, 102, 33, 0.35);
+    color: var(--ntv-orange);
+    padding: 12px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .details-btn-edit:hover {
+    background: var(--ntv-orange);
+    border-color: var(--ntv-orange);
+    color: #fff;
+    transform: translateY(-1.5px);
+    box-shadow: 0 4px 12px rgba(237, 102, 33, 0.3);
+  }
+  
+  .details-btn-delete {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: rgba(239, 68, 68, 0.08);
+    border: 1px solid rgba(239, 68, 68, 0.35);
+    color: #f87171;
+    padding: 12px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .details-btn-delete:hover {
+    background: #ef4444;
+    border-color: #ef4444;
+    color: #fff;
+    transform: translateY(-1.5px);
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+  }
 
   /* Modal Styles */
   .input-hint { font-size: 11px; color: var(--text-secondary); opacity: 0.7; margin-top: 8px; }
@@ -2000,6 +2439,30 @@ const formatTo24hr = (timeStr: string) => {
     .history-header-filters { flex-direction: column; align-items: stretch; gap: 12px; }
     .date-filters { width: 100%; flex-wrap: wrap; }
     .date-input-group { flex: 1; min-width: 120px; }
+
+    /* Responsive Details Modal styles */
+    .details-modal-content {
+      max-height: 95vh;
+      overflow-y: auto;
+      padding: 20px;
+    }
+    .details-modal-grid {
+      flex-direction: column;
+      overflow: visible;
+      gap: 20px;
+    }
+    .details-info-side {
+      width: 100%;
+      border-right: none;
+      border-bottom: 1px solid var(--border-subtle);
+      padding-right: 0;
+      padding-bottom: 20px;
+      overflow-y: visible;
+    }
+    .details-gallery-side {
+      width: 100%;
+      overflow: visible;
+    }
   }
 
   @media (max-width: 480px) {
@@ -2185,6 +2648,8 @@ const formatTo24hr = (timeStr: string) => {
     display: inline-block;
     transition: transform 0.15s, border-color 0.15s;
     background: #050b16;
+    padding: 0;
+    cursor: pointer;
   }
   :global(.doc-thumb-link:hover) {
     transform: scale(1.08);

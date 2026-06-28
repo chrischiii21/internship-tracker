@@ -705,25 +705,32 @@ if (viewSection) {
     transition: 0.2s;
   }
 
-  .view-proof-btn {
+  :global(.view-proof-btn) {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    gap: 6px;
     background: rgba(237, 102, 33, 0.08);
-    border: 1px solid rgba(237, 102, 33, 0.25);
+    border: 1px solid rgba(237, 102, 33, 0.35);
     color: var(--ntv-orange);
-    padding: 4px 10px;
-    border-radius: 6px;
+    padding: 6px 12px;
+    border-radius: 8px;
     font-size: 11px;
-    font-weight: 600;
+    font-weight: 700;
     cursor: pointer;
     white-space: nowrap;
-    transition: all 0.2s;
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   }
-  .view-proof-btn:hover {
+  :global(.view-proof-btn:hover) {
     background: var(--ntv-orange);
     border-color: var(--ntv-orange);
     color: #fff;
+    transform: translateY(-1.5px);
+    box-shadow: 0 4px 12px rgba(237, 102, 33, 0.3);
+  }
+  :global(.view-proof-btn:active) {
+    transform: translateY(0);
+    box-shadow: 0 2px 4px rgba(237, 102, 33, 0.2);
   }
   .btn-setup:hover {
     filter: brightness(1.15);
