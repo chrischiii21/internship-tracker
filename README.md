@@ -1,4 +1,4 @@
-# 🎓 OJT Coordinator Platform
+# 🎓 InternFlow
 
 A high-performance, mobile-responsive internship management system designed to streamline time tracking, DTR (Daily Time Record) generation, and student progress monitoring.
 
