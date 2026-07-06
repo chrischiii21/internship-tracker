@@ -32,6 +32,10 @@ if (settings.coordinatorId) {
 }
 
 const isLinked = settings.role === 'student' && !!settings.coordinatorId;
+
+const displayStartDate = settings.isEmployee ? (settings.employeeStartDate || settings.startDate) : settings.startDate;
+const displayHostCompany = settings.isEmployee ? (settings.employerCompany || settings.hostCompany) : settings.hostCompany;
+const displayPaySchedule = settings.isEmployee ? (settings.employeePaySchedule || 'monthly') : settings.paySchedule;
 ---
 <Layout>
   <Header user={user} />
@@ -60,93 +64,248 @@ const isLinked = settings.role === 'student' && !!settings.coordinatorId;
           {settings.role === 'student' && (
             <>
               <section class="settings-card">
-                <h2 class="card-title">Internship Configuration</h2>
+                <h2 class="card-title">{settings.isEmployee ? "Employment & Tracker Configuration" : "Internship Configuration"}</h2>
                 <form action="/api/settings" method="POST" class="settings-form">
                   <input type="hidden" name="setupComplete" value="true" />
                   <input type="hidden" name="redirect" value="/settings" />
                   
+                  <div class="allowance-header" style="margin-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 16px;">
+                    <label class="check-label">
+                      <input type="checkbox" name="isEmployee" value="true" checked={settings.isEmployee} id="employee-toggle-settings" />
+                      <span class="toggle-text" style="font-weight: 700; color: var(--ntv-orange);">Now an Employee Mode</span>
+                    </label>
+                    <p class="form-hint" style="margin-left: 28px; margin-top: 4px;">Enabling Employee Mode changes the tracking layout to a personal Clockify-style portal, resets target hours, and switches pay to a monthly salary rate.</p>
+                  </div>
+
                   <div class="form-row">
                     <div class="form-group">
-                      <label for="program">Program / Course</label>
-                      <input type="text" id="program" name="program" value={settings.program} placeholder="Enter your program" required />
-                    </div>
-                  </div>
-                  <div class="form-row">
-                    <div class="form-group">
-                      <label for="hostCompany">Host Training Establishment (Company)</label>
-                      <input type="text" id="hostCompany" name="hostCompany" value={settings.hostCompany} placeholder="Enter company name" required />
-                    </div>
-                  </div>
-                  <div class="form-row split">
-                    <div class="form-group">
-                      <label for="supervisor">Supervisor Name</label>
-                      <input type="text" id="supervisor" name="supervisor" value={settings.supervisor} placeholder="Enter supervisor name" required />
-                    </div>
-                    <div class="form-group">
-                      <label for="supervisorPosition">Supervisor Position</label>
-                      <input type="text" id="supervisorPosition" name="supervisorPosition" value={settings.supervisorPosition} placeholder="Enter position" required />
+                      <label for="hostCompany" id="company-label">{settings.isEmployee ? "Employer / Company Name" : "Host Training Establishment (Company)"}</label>
+                      <input 
+                        type="text" 
+                        id="hostCompany" 
+                        name="hostCompany" 
+                        value={displayHostCompany} 
+                        data-ojt-value={settings.hostCompany || ''} 
+                        data-emp-value={settings.employerCompany || ''} 
+                        placeholder="Enter company name" 
+                        required 
+                      />
                     </div>
                   </div>
 
-                  <div class="form-row split">
+                  <div class="form-row">
                     <div class="form-group">
-                      <label for="startDate">Program Start Date</label>
-                      <input type="date" id="startDate" name="startDate" value={settings.startDate} required />
+                      <label for="startDate" id="startDate-label">{settings.isEmployee ? "Employment Start Date" : "Program Start Date"}</label>
+                      <input 
+                        type="date" 
+                        id="startDate" 
+                        name="startDate" 
+                        value={displayStartDate} 
+                        data-ojt-value={settings.startDate || ''} 
+                        data-emp-value={settings.employeeStartDate || ''} 
+                        required 
+                        style="width: 100%; max-width: 100%;" 
+                      />
                     </div>
-                    <div class="form-group">
-                      <label for="targetHours">Target Hours</label>
-                      <div class="input-wrapper">
-                        <input type="number" id="targetHours" name="targetHours" value={settings.targetHours} step="0.5" required />
-                        <span class="input-suffix">hrs</span>
+                  </div>
+
+                  <!-- OJT Specific Fields -->
+                  <div id="ojt-fields-settings" style={settings.isEmployee ? "display: none;" : ""}>
+                    <div class="form-row">
+                      <div class="form-group">
+                        <label for="program">Program / Course</label>
+                        <input type="text" id="program" name="program" value={settings.program} placeholder="Enter your program" required={!settings.isEmployee} />
                       </div>
                     </div>
-                  </div>
-
-                  <div class="allowance-header">
-                    <label class="check-label">
-                      <input type="checkbox" name="hasAllowance" value="true" checked={settings.hasAllowance} id="allowance-toggle-settings" />
-                      <span class="toggle-text">Enable Allowance Tracking</span>
-                    </label>
-                  </div>
-
-                  <div id="allowance-fields-settings" style={settings.hasAllowance ? "" : "display: none;"}>
                     <div class="form-row split">
                       <div class="form-group">
-                        <label for="payType">Pay Model</label>
-                        <select name="payType" id="payType" class="settings-select">
-                          <option value="hourly" selected={settings.payType === 'hourly'}>Hourly Rate</option>
-                          <option value="daily" selected={settings.payType === 'daily'}>Fixed Daily Rate</option>
-                        </select>
+                        <label for="supervisor">Supervisor Name</label>
+                        <input type="text" id="supervisor" name="supervisor" value={settings.supervisor} placeholder="Enter supervisor name" required={!settings.isEmployee} />
                       </div>
                       <div class="form-group">
-                        <label for="hourlyRate">Rate (₱)</label>
-                        <div class="input-wrapper">
-                          <span class="input-prefix">₱</span>
-                          <input type="number" id="hourlyRate" name="hourlyRate" value={settings.hourlyRate} step="0.5" required />
-                        </div>
+                        <label for="supervisorPosition">Supervisor Position</label>
+                        <input type="text" id="supervisorPosition" name="supervisorPosition" value={settings.supervisorPosition} placeholder="Enter position" required={!settings.isEmployee} />
                       </div>
                     </div>
 
                     <div class="form-row">
                       <div class="form-group">
-                        <label for="paySchedule">Pay Schedule</label>
-                        <select name="paySchedule" id="paySchedule" class="settings-select">
-                          <option value="weekly" selected={settings.paySchedule === 'weekly'}>Every Week</option>
-                          <option value="semi-monthly" selected={settings.paySchedule === 'semi-monthly'}>Semi-monthly (15th/30th)</option>
-                          <option value="monthly" selected={settings.paySchedule === 'monthly'}>Monthly</option>
+                        <label for="targetHours">Target Hours</label>
+                        <div class="input-wrapper">
+                          <input type="number" id="targetHours" name="targetHours" value={settings.targetHours} step="0.5" required={!settings.isEmployee} />
+                          <span class="input-suffix">hrs</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="allowance-header" style="margin-top: 20px;">
+                      <label class="check-label">
+                        <input type="checkbox" name="hasAllowance" value="true" checked={settings.hasAllowance} id="allowance-toggle-settings" />
+                        <span class="toggle-text">Enable Allowance Tracking</span>
+                      </label>
+                    </div>
+
+                    <div id="allowance-fields-settings" style={settings.hasAllowance ? "" : "display: none;"}>
+                      <div class="form-row split">
+                        <div class="form-group">
+                          <label for="payType">Pay Model</label>
+                          <select name="payType" id="payType" class="settings-select">
+                            <option value="hourly" selected={settings.payType === 'hourly'}>Hourly Rate</option>
+                            <option value="daily" selected={settings.payType === 'daily'}>Fixed Daily Rate</option>
+                          </select>
+                        </div>
+                        <div class="form-group">
+                          <label for="hourlyRate">Rate (₱)</label>
+                          <div class="input-wrapper">
+                            <span class="input-prefix">₱</span>
+                            <input type="number" id="hourlyRate" name="hourlyRate" value={settings.hourlyRate} step="0.5" required={!settings.isEmployee && settings.hasAllowance} />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div class="form-row">
+                        <div class="form-group">
+                          <label for="paySchedule">Pay Schedule</label>
+                          <select name="paySchedule" id="paySchedule" class="settings-select">
+                            <option value="weekly" selected={settings.paySchedule === 'weekly'}>Every Week</option>
+                            <option value="semi-monthly" selected={settings.paySchedule === 'semi-monthly'}>Semi-monthly (15th/30th)</option>
+                            <option value="monthly" selected={settings.paySchedule === 'monthly'}>Monthly</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Employee Specific Fields -->
+                  <div id="employee-fields-settings" style={settings.isEmployee ? "" : "display: none;"}>
+                    <div class="form-row split">
+                      <div class="form-group">
+                        <label for="monthlyRate">Monthly Salary Rate (₱)</label>
+                        <div class="input-wrapper">
+                          <span class="input-prefix">₱</span>
+                          <input type="number" id="monthlyRate" name="monthlyRate" value={settings.monthlyRate} step="0.01" required={settings.isEmployee} />
+                        </div>
+                      </div>
+                      <div class="form-group">
+                        <label for="employeePaySchedule">Pay Schedule</label>
+                        <select name="paySchedule" id="employeePaySchedule" class="settings-select">
+                          <option value="semi-monthly" selected={displayPaySchedule === 'semi-monthly'}>Semi-monthly (Every 15 days)</option>
+                          <option value="monthly" selected={displayPaySchedule === 'monthly'}>Monthly</option>
                         </select>
                       </div>
                     </div>
                   </div>
 
-                  <button type="submit" class="save-btn">Update Configuration</button>
+                  <button type="submit" class="save-btn" style="margin-top: 24px;">Update Configuration</button>
                 </form>
 
                 <script is:inline>
                   document.getElementById('allowance-toggle-settings')?.addEventListener('change', (e) => {
                     const fields = document.getElementById('allowance-fields-settings');
+                    const rateInput = document.getElementById('hourlyRate');
                     if (fields) fields.style.display = e.target.checked ? 'block' : 'none';
+                    if (rateInput) rateInput.required = e.target.checked;
                   });
+
+                  const empToggle = document.getElementById('employee-toggle-settings');
+                  const ojtContainer = document.getElementById('ojt-fields-settings');
+                  const empContainer = document.getElementById('employee-fields-settings');
+                  const mainCardTitle = empToggle?.closest('.settings-card')?.querySelector('.card-title');
+                  const lblCompany = document.getElementById('company-label');
+                  const lblStartDate = document.getElementById('startDate-label');
+
+                  const inpCompany = document.getElementById('hostCompany');
+                  const inpStartDate = document.getElementById('startDate');
+
+                  const inpProgram = document.getElementById('program');
+                  const inpSupervisor = document.getElementById('supervisor');
+                  const inpSupervisorPos = document.getElementById('supervisorPosition');
+                  const inpTargetHours = document.getElementById('targetHours');
+                  const inpHourlyRate = document.getElementById('hourlyRate');
+                  const inpMonthlyRate = document.getElementById('monthlyRate');
+
+                  const selOjtPaySchedule = document.getElementById('paySchedule');
+                  const selEmpPaySchedule = document.getElementById('employeePaySchedule');
+
+                  function handleToggleChange() {
+                    const isEmp = empToggle?.checked;
+                    if (isEmp) {
+                      if (ojtContainer) ojtContainer.style.display = 'none';
+                      if (empContainer) empContainer.style.display = 'block';
+                      if (mainCardTitle) mainCardTitle.textContent = 'Employment & Tracker Configuration';
+                      if (lblCompany) lblCompany.textContent = 'Employer / Company Name';
+                      if (lblStartDate) lblStartDate.textContent = 'Employment Start Date';
+
+                      // Swap to employee values in inputs
+                      if (inpCompany) inpCompany.value = inpCompany.getAttribute('data-emp-value') || '';
+                      if (inpStartDate) inpStartDate.value = inpStartDate.getAttribute('data-emp-value') || '';
+
+                      if (inpProgram) inpProgram.required = false;
+                      if (inpSupervisor) inpSupervisor.required = false;
+                      if (inpSupervisorPos) inpSupervisorPos.required = false;
+                      if (inpTargetHours) inpTargetHours.required = false;
+                      if (inpHourlyRate) inpHourlyRate.required = false;
+                      if (inpMonthlyRate) inpMonthlyRate.required = true;
+
+                      if (selOjtPaySchedule) selOjtPaySchedule.disabled = true;
+                      if (selEmpPaySchedule) selEmpPaySchedule.disabled = false;
+
+                      const inviteInp = document.getElementById('coordinatorInvite');
+                      const unlinkB = document.getElementById('open-coordinator-unlink-modal');
+                      const cardCoord = inviteInp?.closest('.settings-card') || unlinkB?.closest('.settings-card');
+                      if (cardCoord) cardCoord.style.display = 'none';
+                    } else {
+                      if (ojtContainer) ojtContainer.style.display = 'block';
+                      if (empContainer) empContainer.style.display = 'none';
+                      if (mainCardTitle) mainCardTitle.textContent = 'Internship Configuration';
+                      if (lblCompany) lblCompany.textContent = 'Host Training Establishment (Company)';
+                      if (lblStartDate) lblStartDate.textContent = 'Program Start Date';
+
+                      // Swap to OJT values in inputs
+                      if (inpCompany) inpCompany.value = inpCompany.getAttribute('data-ojt-value') || '';
+                      if (inpStartDate) inpStartDate.value = inpStartDate.getAttribute('data-ojt-value') || '';
+
+                      if (inpProgram) inpProgram.required = true;
+                      if (inpSupervisor) inpSupervisor.required = true;
+                      if (inpSupervisorPos) inpSupervisorPos.required = true;
+                      if (inpTargetHours) inpTargetHours.required = true;
+                      if (inpHourlyRate) {
+                        const allowanceT = document.getElementById('allowance-toggle-settings');
+                        inpHourlyRate.required = allowanceT ? allowanceT.checked : false;
+                      }
+                      if (inpMonthlyRate) inpMonthlyRate.required = false;
+
+                      if (selOjtPaySchedule) selOjtPaySchedule.disabled = false;
+                      if (selEmpPaySchedule) selEmpPaySchedule.disabled = true;
+
+                      const inviteInp = document.getElementById('coordinatorInvite');
+                      const unlinkB = document.getElementById('open-coordinator-unlink-modal');
+                      const cardCoord = inviteInp?.closest('.settings-card') || unlinkB?.closest('.settings-card');
+                      if (cardCoord) cardCoord.style.display = 'block';
+                    }
+                  }
+
+                  // Update temporary values when typing so edits are preserved across toggles
+                  inpCompany?.addEventListener('input', (e) => {
+                    const isEmp = empToggle?.checked;
+                    if (isEmp) {
+                      inpCompany.setAttribute('data-emp-value', e.target.value);
+                    } else {
+                      inpCompany.setAttribute('data-ojt-value', e.target.value);
+                    }
+                  });
+
+                  inpStartDate?.addEventListener('change', (e) => {
+                    const isEmp = empToggle?.checked;
+                    if (isEmp) {
+                      inpStartDate.setAttribute('data-emp-value', e.target.value);
+                    } else {
+                      inpStartDate.setAttribute('data-ojt-value', e.target.value);
+                    }
+                  });
+
+                  empToggle?.addEventListener('change', handleToggleChange);
+                  if (empToggle) handleToggleChange();
                 </script>
               </section>
 
@@ -271,10 +430,12 @@ const isLinked = settings.role === 'student' && !!settings.coordinatorId;
                   <span class="help-label">Sync Status</span>
                   <span class="help-value">{settings.clockifyEnabled ? 'Active' : 'Paused'}</span>
                 </div>
-                <div class="help-item">
-                  <span class="help-label">Target Hours</span>
-                  <span class="help-value">{formatHours(settings.targetHours)}</span>
-                </div>
+                {!settings.isEmployee && (
+                  <div class="help-item">
+                    <span class="help-label">Target Hours</span>
+                    <span class="help-value">{formatHours(settings.targetHours)}</span>
+                  </div>
+                )}
               </div>
             </section>
           )}

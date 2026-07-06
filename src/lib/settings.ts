@@ -21,6 +21,11 @@ export interface AppSettings {
   userEmail?: string;
   userPicture?: string;
   clockifyEnabled: boolean;
+  isEmployee?: boolean;
+  monthlyRate?: number;
+  employeeStartDate?: string;
+  employerCompany?: string;
+  employeePaySchedule?: 'semi-monthly' | 'monthly';
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -36,7 +41,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   payType: 'hourly',
   paySchedule: 'monthly',
   role: 'student',
-  clockifyEnabled: true
+  clockifyEnabled: true,
+  isEmployee: false,
+  monthlyRate: 0,
+  employeeStartDate: '',
+  employerCompany: '',
+  employeePaySchedule: 'monthly'
 };
 
 export async function getAppSettings(userId: string): Promise<AppSettings> {
@@ -86,7 +96,12 @@ export async function getAppSettings(userId: string): Promise<AppSettings> {
       userName: studentData.user_name,
       userEmail: studentData.user_email,
       userPicture: studentData.user_picture,
-      clockifyEnabled: studentData.clockify_enabled ?? true
+      clockifyEnabled: studentData.clockify_enabled ?? true,
+      isEmployee: studentData.is_employee ?? false,
+      monthlyRate: studentData.monthly_rate ?? 0,
+      employeeStartDate: studentData.employee_start_date,
+      employerCompany: studentData.employer_company,
+      employeePaySchedule: studentData.employee_pay_schedule ?? 'monthly'
     };
   }
 
@@ -133,6 +148,11 @@ export async function saveAppSettings(userId: string, updated: Partial<AppSettin
         pay_type: updated.payType || DEFAULT_SETTINGS.payType,
         pay_schedule: updated.paySchedule || DEFAULT_SETTINGS.paySchedule,
         clockify_enabled: updated.clockifyEnabled ?? DEFAULT_SETTINGS.clockifyEnabled,
+        is_employee: updated.isEmployee ?? DEFAULT_SETTINGS.isEmployee,
+        monthly_rate: updated.monthlyRate ?? DEFAULT_SETTINGS.monthlyRate,
+        employee_start_date: updated.employeeStartDate,
+        employer_company: updated.employerCompany,
+        employee_pay_schedule: updated.employeePaySchedule,
         updated_at: new Date().toISOString()
       });
   }

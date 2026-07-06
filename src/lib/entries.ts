@@ -13,12 +13,13 @@ export interface TimeEntry {
   documentationUrls: string[];
 }
 
-export async function getManualEntries(userId: string): Promise<TimeEntry[]> {
+export async function getManualEntries(userId: string, isEmployee: boolean = false): Promise<TimeEntry[]> {
   try {
     const { data, error } = await supabase
       .from('entries')
       .select('*')
       .eq('user_id', userId)
+      .eq('is_employee', isEmployee)
       .order('start_time', { ascending: false });
 
     if (error) throw error;
@@ -49,7 +50,7 @@ export async function getManualEntries(userId: string): Promise<TimeEntry[]> {
   }
 }
 
-export async function addManualEntry(entry: { userId: string, description: string, date: string, startTime: string, endTime: string, documentationUrls?: string[] }) {
+export async function addManualEntry(entry: { userId: string, description: string, date: string, startTime: string, endTime: string, documentationUrls?: string[], isEmployee?: boolean }) {
   // Combine date and time to create full timestamps in Philippine Time
   const ensureSeconds = (t: string) => t.split(':').length === 2 ? `${t}:00` : t;
   const startStr = `${entry.date}T${ensureSeconds(entry.startTime)}+08:00`;
@@ -60,8 +61,6 @@ export async function addManualEntry(entry: { userId: string, description: strin
   const end = new Date(endStr);
   
   if (end < start) throw new Error('End time must be after start time');
-
-  const durationSeconds = (end.getTime() - start.getTime()) / 1000;
   
   const { data, error } = await supabase
     .from('entries')
@@ -71,7 +70,8 @@ export async function addManualEntry(entry: { userId: string, description: strin
       start_time: start.toISOString(),
       end_time: end.toISOString(),
       duration_seconds: durationSeconds,
-      documentation_urls: entry.documentationUrls || []
+      documentation_urls: entry.documentationUrls || [],
+      is_employee: entry.isEmployee ?? false
     })
     .select()
     .single();
@@ -124,12 +124,13 @@ export interface ActiveTimer {
   description: string;
 }
 
-export async function getActiveTimer(userId: string): Promise<ActiveTimer | null> {
+export async function getActiveTimer(userId: string, isEmployee: boolean = false): Promise<ActiveTimer | null> {
   try {
     const { data, error } = await supabase
       .from('active_timers')
       .select('*')
       .eq('user_id', userId)
+      .eq('is_employee', isEmployee)
       .single();
 
     if (error || !data) return null;
@@ -144,14 +145,15 @@ export async function getActiveTimer(userId: string): Promise<ActiveTimer | null
   }
 }
 
-export async function startTimer(userId: string, description: string = '') {
+export async function startTimer(userId: string, description: string = '', isEmployee: boolean = false) {
   const { data, error } = await supabase
     .from('active_timers')
     .upsert({
       user_id: userId,
       description,
       start_time: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+      updated_at: new Date().toISOString(),
+      is_employee: isEmployee
     })
     .select()
     .single();
@@ -160,8 +162,8 @@ export async function startTimer(userId: string, description: string = '') {
   return data;
 }
 
-export async function stopTimer(userId: string, description: string) {
-  const timer = await getActiveTimer(userId);
+export async function stopTimer(userId: string, description: string, isEmployee: boolean = false) {
+  const timer = await getActiveTimer(userId, isEmployee);
   if (!timer) throw new Error('No active timer found');
   if (!description) throw new Error('Description is required to stop the timer');
 
@@ -176,7 +178,8 @@ export async function stopTimer(userId: string, description: string) {
       description,
       start_time: start.toISOString(),
       end_time: now.toISOString(),
-      duration_seconds: Math.max(0, durationSeconds)
+      duration_seconds: Math.max(0, durationSeconds),
+      is_employee: isEmployee
     });
 
   if (logError) throw logError;
@@ -184,12 +187,13 @@ export async function stopTimer(userId: string, description: string) {
   const { error } = await supabase
     .from('active_timers')
     .delete()
-    .eq('user_id', userId);
+    .eq('user_id', userId)
+    .eq('is_employee', isEmployee);
 
   if (error) throw error;
 }
 
-export async function updateTimerStart(userId: string, startTimeStr: string) {
+export async function updateTimerStart(userId: string, startTimeStr: string, isEmployee: boolean = false) {
   // startTimeStr is HH:mm
   const now = new Date();
   const dateStr = now.toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
@@ -202,7 +206,8 @@ export async function updateTimerStart(userId: string, startTimeStr: string) {
       start_time: fullStart.toISOString(),
       updated_at: new Date().toISOString()
     })
-    .eq('user_id', userId);
+    .eq('user_id', userId)
+    .eq('is_employee', isEmployee);
 
   if (error) throw error;
 }

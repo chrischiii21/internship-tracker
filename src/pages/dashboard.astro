@@ -33,20 +33,20 @@ if (Astro.request.method === 'POST') {
 
   if (action === 'start-timer') {
     const desc = formData.get('description') as string;
-    await startTimer(user.id, desc);
+    await startTimer(user.id, desc, settings.isEmployee);
     return Astro.redirect('/dashboard?success=Timer started');
   }
 
   if (action === 'update-start') {
     const newStart = formData.get('startTime') as string;
-    await updateTimerStart(user.id, newStart);
+    await updateTimerStart(user.id, newStart, settings.isEmployee);
     return Astro.redirect('/dashboard?success=Start time updated');
   }
 
   if (action === 'stop-timer') {
     const desc = formData.get('description') as string;
     try {
-      await stopTimer(user.id, desc);
+      await stopTimer(user.id, desc, settings.isEmployee);
       const { addSyncLog } = await import('../lib/logs');
       await addSyncLog({ userId: user.id, type: 'Sync', status: 'Success', details: `Timer stopped: ${desc || 'No description'}` });
       return Astro.redirect('/dashboard?success=Activity log saved');
@@ -56,10 +56,14 @@ if (Astro.request.method === 'POST') {
   }
 }
 
-const activeTimer = await getActiveTimer(user.id);
+const activeTimer = await getActiveTimer(user.id, settings.isEmployee);
+
+const activeStartDate = settings.isEmployee ? (settings.employeeStartDate || settings.startDate) : settings.startDate;
+const activePaySchedule = settings.isEmployee ? (settings.employeePaySchedule || 'monthly') : settings.paySchedule;
+const activeCompany = settings.isEmployee ? (settings.employerCompany || settings.hostCompany) : settings.hostCompany;
 
 // Calculate Total Progress using the Unified Sync Engine
-const renderedHours = await getStudentProgress(user.id, user.email, settings.startDate);
+const renderedHours = await getStudentProgress(user.id, user.email, activeStartDate);
 
 // Fetch detailed entry breakdown for the chart/list
 let allRawEntries: { date: string, durationSeconds: number }[] = [];
@@ -67,27 +71,34 @@ try {
   if (settings.clockifyEnabled !== false) {
     const clockifyUser = await getClockifyUser(user.email);
     if (clockifyUser) {
-      const clockifyData = await getRenderedHours(clockifyUser.id, settings.startDate);
+      const clockifyData = await getRenderedHours(clockifyUser.id, activeStartDate);
       allRawEntries = [...clockifyData.entries];
     }
   }
 } catch (e) {}
 
 // Always add manual entries to the breakdown
-const manualEntries = await getManualEntries(user.id);
+const manualEntries = await getManualEntries(user.id, settings.isEmployee);
 allRawEntries = [
   ...allRawEntries,
   ...manualEntries
-    .filter(e => new Date(e.date) >= new Date(settings.startDate))
+    .filter(e => new Date(e.date) >= new Date(activeStartDate))
     .map(e => ({ date: e.date, durationSeconds: e.durationSeconds }))
 ];
 
-const grouped = groupEntries(allRawEntries, settings.hasAllowance ? settings.paySchedule : 'monthly');
+const grouped = groupEntries(allRawEntries, (settings.hasAllowance || settings.isEmployee) ? activePaySchedule : 'monthly');
 const adjustments = await getPayoutAdjustments(user.id);
 
 let runningCarryOver = 0;
 const monthlyDataRaw = grouped.map(item => {
-  const calculatedEarnings = (item.totalSeconds / 3600) * settings.hourlyRate;
+  let calculatedEarnings = 0;
+  if (settings.isEmployee) {
+    calculatedEarnings = settings.paySchedule === 'semi-monthly' 
+      ? (settings.monthlyRate || 0) / 2 
+      : (settings.monthlyRate || 0);
+  } else {
+    calculatedEarnings = (item.totalSeconds / 3600) * settings.hourlyRate;
+  }
   const totalExpected = calculatedEarnings + runningCarryOver;
   
   // If user hasn't set an adjustment, we assume they received the full amount (expected)
@@ -113,42 +124,47 @@ const monthlyDataRaw = grouped.map(item => {
 
 const monthlyData = [...monthlyDataRaw].reverse();
 
-const totalEarnings = renderedHours * settings.hourlyRate;
-const progressPercent = Math.min(100, (renderedHours / (settings.targetHours || 1)) * 100);
+const totalEarnings = settings.isEmployee 
+  ? monthlyDataRaw.reduce((sum, item) => sum + item.calculated, 0)
+  : renderedHours * settings.hourlyRate;
+const progressPercent = settings.isEmployee ? 0 : Math.min(100, (renderedHours / (settings.targetHours || 1)) * 100);
 
 // Calculate Estimated Finish Date
-const remainingHours = Math.max(0, settings.targetHours - renderedHours);
-let avgHoursPerDay = 8; // Default
+let finishDateStr = '';
+if (!settings.isEmployee) {
+  const remainingHours = Math.max(0, settings.targetHours - renderedHours);
+  let avgHoursPerDay = 8; // Default
 
-if (allRawEntries.length > 0) {
-  // Calculate average from last 7 unique days of logs
-  const dailyTotals: Record<string, number> = {};
-  allRawEntries.forEach(e => {
-    dailyTotals[e.date] = (dailyTotals[e.date] || 0) + (e.durationSeconds / 3600);
+  if (allRawEntries.length > 0) {
+    // Calculate average from last 7 unique days of logs
+    const dailyTotals: Record<string, number> = {};
+    allRawEntries.forEach(e => {
+      dailyTotals[e.date] = (dailyTotals[e.date] || 0) + (e.durationSeconds / 3600);
+    });
+    const recentDays = Object.values(dailyTotals).slice(-7);
+    if (recentDays.length > 0) {
+      avgHoursPerDay = recentDays.reduce((a, b) => a + b, 0) / recentDays.length;
+      if (avgHoursPerDay < 1) avgHoursPerDay = 8; // Fallback if average is too low
+    }
+  }
+
+  const workDaysRemaining = Math.ceil(remainingHours / avgHoursPerDay);
+  let estimatedFinishDate = new Date();
+  let daysAdded = 0;
+  while (daysAdded < workDaysRemaining) {
+    estimatedFinishDate.setDate(estimatedFinishDate.getDate() + 1);
+    // Skip weekends (0 is Sunday, 6 is Saturday)
+    if (estimatedFinishDate.getDay() !== 0 && estimatedFinishDate.getDay() !== 6) {
+      daysAdded++;
+    }
+  }
+
+  finishDateStr = estimatedFinishDate.toLocaleDateString('en-US', { 
+    month: 'short', 
+    day: 'numeric', 
+    year: 'numeric' 
   });
-  const recentDays = Object.values(dailyTotals).slice(-7);
-  if (recentDays.length > 0) {
-    avgHoursPerDay = recentDays.reduce((a, b) => a + b, 0) / recentDays.length;
-    if (avgHoursPerDay < 1) avgHoursPerDay = 8; // Fallback if average is too low
-  }
 }
-
-const workDaysRemaining = Math.ceil(remainingHours / avgHoursPerDay);
-let estimatedFinishDate = new Date();
-let daysAdded = 0;
-while (daysAdded < workDaysRemaining) {
-  estimatedFinishDate.setDate(estimatedFinishDate.getDate() + 1);
-  // Skip weekends (0 is Sunday, 6 is Saturday)
-  if (estimatedFinishDate.getDay() !== 0 && estimatedFinishDate.getDay() !== 6) {
-    daysAdded++;
-  }
-}
-
-const finishDateStr = estimatedFinishDate.toLocaleDateString('en-US', { 
-  month: 'short', 
-  day: 'numeric', 
-  year: 'numeric' 
-});
 ---
 
 <Layout title="Dashboard">
@@ -370,7 +386,7 @@ const finishDateStr = estimatedFinishDate.toLocaleDateString('en-US', {
         <div class="dashboard-header">
           <div class="header-main">
             <h1>Welcome back, <span class="accent">{user.name}</span></h1>
-            <p>Here's your current internship status and progress tracker.</p>
+            <p>{settings.isEmployee ? "Here's your time tracking dashboard and pay logs." : "Here's your current internship status and progress tracker."}</p>
           </div>
           <div class="header-date">
             <span class="date-label">TODAY</span>
@@ -432,83 +448,124 @@ const finishDateStr = estimatedFinishDate.toLocaleDateString('en-US', {
         </section>
 
         <div class="metrics-grid">
-          <div class="metrics-column">
-            <div class="metric-card">
-              <div class="metric-info">
-                <span class="metric-label">Hours Rendered</span>
-                <div class="metric-value">{formatHours(renderedHours)} <span class="unit">/ {formatHours(settings.targetHours)}</span></div>
-              </div>
-              <div class="metric-progress">
-                <div class="progress-track">
-                  <div class={`progress-fill ${progressPercent >= 100 ? 'success' : ''}`} style={`width: ${progressPercent}%`}></div>
-                </div>
-                <div class="progress-status">
-                  <span>{progressPercent >= 100 ? 'Completed' : 'In Progress'}</span>
-                  <span class="percent-val">{progressPercent.toFixed(2)}%</span>
+          {settings.isEmployee ? (
+            <>
+              <div class="metric-card" style="justify-content: center; height: 100%; min-height: 180px;">
+                <div class="metric-info">
+                  <span class="metric-label">Total Time Tracked</span>
+                  <div class="metric-value" style="font-size: 36px;">{formatHours(renderedHours)}</div>
+                  <span class="metric-subtext" style="margin-top: 4px; display: block; font-size: 13px; color: var(--text-secondary);">
+                    Active session hours logged in your system.
+                  </span>
                 </div>
               </div>
-            </div>
 
-            <div class={`metric-card highlight-card ${renderedHours > settings.targetHours ? 'overtime' : ''}`}>
-              <div class="metric-info">
-                <span class="metric-label">{renderedHours > settings.targetHours ? 'Excess Time' : 'Remaining Time'}</span>
-                <div class="metric-value">
-                  {renderedHours > settings.targetHours ? '+' : ''}
-                  {formatHMS(Math.abs((settings.targetHours * 3600) - (renderedHours * 3600)))}
+              <div class="metric-card company-summary">
+                <div class="company-header-mini">
+                  <div class="company-info-mini">
+                    <span class="metric-label">Employment Details</span>
+                    <div class="metric-value-mini text-truncate">{activeCompany || 'Not set'}</div>
+                  </div>
                 </div>
-                <span class="metric-subtext">
-                  {renderedHours >= settings.targetHours 
-                    ? 'Goal reached! Every hour now is extra credit.' 
-                    : `Est. Finish: ${finishDateStr}`}
-                </span>
+                <div class="company-quick-details">
+                  <div class="quick-row">
+                    <span class="q-label">Employment Type:</span>
+                    <span class="q-value">Full-time / Personal Tracker</span>
+                  </div>
+                  <div class="quick-row">
+                    <span class="q-label">Monthly Rate:</span>
+                    <span class="q-value">₱{settings.monthlyRate?.toLocaleString()} / month</span>
+                  </div>
+                  <div class="quick-row">
+                    <span class="q-label">Pay Schedule:</span>
+                    <span class="q-value">{activePaySchedule === 'semi-monthly' ? 'Every 15 days (Semi-monthly)' : 'Monthly'}</span>
+                  </div>
+                  <div class="quick-row">
+                    <span class="q-label">Start Date:</span>
+                    <span class="q-value">{activeStartDate}</span>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
+            </>
+          ) : (
+            <>
+              <div class="metrics-column">
+                <div class="metric-card">
+                  <div class="metric-info">
+                    <span class="metric-label">Hours Rendered</span>
+                    <div class="metric-value">{formatHours(renderedHours)} <span class="unit">/ {formatHours(settings.targetHours)}</span></div>
+                  </div>
+                  <div class="metric-progress">
+                    <div class={`progress-fill ${progressPercent >= 100 ? 'success' : ''}`} style={`width: ${progressPercent}%`}></div>
+                  </div>
+                  <div class="progress-status">
+                    <span>{progressPercent >= 100 ? 'Completed' : 'In Progress'}</span>
+                    <span class="percent-val">{progressPercent.toFixed(2)}%</span>
+                  </div>
+                </div>
 
-          <div class="metric-card company-summary">
-            <div class="company-header-mini">
-              <div class="company-info-mini">
-                <span class="metric-label">Internship Configuration</span>
-                <div class="metric-value-mini text-truncate">{settings.hostCompany || 'Not set'}</div>
+                <div class={`metric-card highlight-card ${renderedHours > settings.targetHours ? 'overtime' : ''}`}>
+                  <div class="metric-info">
+                    <span class="metric-label">{renderedHours > settings.targetHours ? 'Excess Time' : 'Remaining Time'}</span>
+                    <div class="metric-value">
+                      {renderedHours > settings.targetHours ? '+' : ''}
+                      {formatHMS(Math.abs((settings.targetHours * 3600) - (renderedHours * 3600)))}
+                    </div>
+                    <span class="metric-subtext">
+                      {renderedHours >= settings.targetHours 
+                        ? 'Goal reached! Every hour now is extra credit.' 
+                        : `Est. Finish: ${finishDateStr}`}
+                    </span>
+                  </div>
+                </div>
               </div>
-            </div>
-            <div class="company-quick-details">
-              <div class="quick-row">
-                <span class="q-label">Program:</span>
-                <span class="q-value">{settings.program || 'Not set'}</span>
-              </div>
-              <div class="quick-row">
-                <span class="q-label">Allowance:</span>
-                <span class="q-value">{settings.hasAllowance ? 'Enabled' : 'Disabled'}</span>
-              </div>
-              {settings.hasAllowance && (
-                <>
+
+              <div class="metric-card company-summary">
+                <div class="company-header-mini">
+                  <div class="company-info-mini">
+                    <span class="metric-label">Internship Configuration</span>
+                    <div class="metric-value-mini text-truncate">{settings.hostCompany || 'Not set'}</div>
+                  </div>
+                </div>
+                <div class="company-quick-details">
                   <div class="quick-row">
-                    <span class="q-label">Pay Model:</span>
-                    <span class="q-value">{settings.payType === 'hourly' ? 'Hourly' : 'Daily'}</span>
+                    <span class="q-label">Program:</span>
+                    <span class="q-value">{settings.program || 'Not set'}</span>
                   </div>
                   <div class="quick-row">
-                    <span class="q-label">Rate:</span>
-                    <span class="q-value">₱{settings.hourlyRate}/{settings.payType === 'hourly' ? 'hr' : 'day'}</span>
+                    <span class="q-label">Allowance:</span>
+                    <span class="q-value">{settings.hasAllowance ? 'Enabled' : 'Disabled'}</span>
                   </div>
-                  <div class="quick-row">
-                    <span class="q-label">Schedule:</span>
-                    <span class="q-value">{settings.paySchedule}</span>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
+                  {settings.hasAllowance && (
+                    <>
+                      <div class="quick-row">
+                        <span class="q-label">Pay Model:</span>
+                        <span class="q-value">{settings.payType === 'hourly' ? 'Hourly' : 'Daily'}</span>
+                      </div>
+                      <div class="quick-row">
+                        <span class="q-label">Rate:</span>
+                        <span class="q-value">₱{settings.hourlyRate}/{settings.payType === 'hourly' ? 'hr' : 'day'}</span>
+                      </div>
+                      <div class="quick-row">
+                        <span class="q-label">Schedule:</span>
+                        <span class="q-value">{settings.paySchedule}</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
         <div class="full-grid">
           <section class="earnings-breakdown">
             <div class="section-header">
-              <h2>{settings.hasAllowance ? 'Earnings' : 'Hours'} <span class="accent">Breakdown</span></h2>
+              <h2>{(settings.hasAllowance || settings.isEmployee) ? 'Earnings' : 'Hours'} <span class="accent">Breakdown</span></h2>
               <div class="total-earnings-summary">
-                <span class="summary-label">{settings.hasAllowance ? 'Total Estimated:' : 'Total Rendered:'}</span>
+                <span class="summary-label">{(settings.hasAllowance || settings.isEmployee) ? 'Total Expected:' : 'Total Rendered:'}</span>
                 <span class="summary-value">
-                  {settings.hasAllowance 
+                  {(settings.hasAllowance || settings.isEmployee) 
                     ? `₱ ${totalEarnings.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                     : `${formatHours(renderedHours)}`}
                 </span>
@@ -521,9 +578,9 @@ const finishDateStr = estimatedFinishDate.toLocaleDateString('en-US', {
       <div class="item-main">
         <span class="item-label">{item.label}</span>
         <div class="item-meta">
-          {settings.hasAllowance ? (
+          {(settings.hasAllowance || settings.isEmployee) ? (
             <>
-              <span class="item-hours">{formatHours(item.rendered)} rendered</span>
+              <span class="item-hours">{formatHours(item.rendered)} tracked</span>
               {item.carryOverIn !== 0 && (
                 <span class={`carry-tag ${item.carryOverIn > 0 ? 'plus' : 'minus'}`}>
                   {item.carryOverIn > 0 ? '+' : ''}₱{item.carryOverIn.toLocaleString()} carry-over
@@ -535,7 +592,7 @@ const finishDateStr = estimatedFinishDate.toLocaleDateString('en-US', {
           )}
         </div>
       </div>
-      {settings.hasAllowance ? (
+      {(settings.hasAllowance || settings.isEmployee) ? (
         <div class="item-values">
           {item.isAdjusted ? (
             <div class="payout-status set">
@@ -590,7 +647,7 @@ const finishDateStr = estimatedFinishDate.toLocaleDateString('en-US', {
         </div>
       )}
     </div>
-    {settings.hasAllowance && item.carryOverOut !== 0 && (
+    {(settings.hasAllowance || settings.isEmployee) && item.carryOverOut !== 0 && (
       <div class="carry-over-line">
         <span class="line-text">
           {item.carryOverOut > 0 ? 'Excess' : 'Shortage'} of ₱{Math.abs(item.carryOverOut).toLocaleString()} added to next period

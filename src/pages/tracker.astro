@@ -19,6 +19,8 @@ if (!user) return Astro.redirect('/');
 const settings = await getAppSettings(user.id);
 if (settings.role === 'coordinator') return Astro.redirect('/coordinator');
 
+const activeStartDate = settings.isEmployee ? (settings.employeeStartDate || settings.startDate) : settings.startDate;
+
 let userInClockify = false;
 let clockifyEntries: any[] = [];
 if (settings.clockifyEnabled !== false) {
@@ -27,7 +29,7 @@ if (settings.clockifyEnabled !== false) {
       const clockifyUser = await getClockifyUser(user.email);
       if (clockifyUser) {
         userInClockify = true;
-        clockifyEntries = await getClockifyDetailedEntries(clockifyUser.id, settings.startDate);
+        clockifyEntries = await getClockifyDetailedEntries(clockifyUser.id, activeStartDate);
       }
     }
   } catch (e) {
@@ -80,7 +82,7 @@ if (Astro.request.method === 'POST') {
     const startTime = convert12to24(startTimeRaw, startAmpm);
     const endTime = convert12to24(endTimeRaw, endAmpm);
     try {
-      await addManualEntry({ userId: user.id, description, date, startTime, endTime, documentationUrls });
+      await addManualEntry({ userId: user.id, description, date, startTime, endTime, documentationUrls, isEmployee: settings.isEmployee });
       const { addSyncLog } = await import('../lib/logs');
       await addSyncLog({ userId: user.id, type: 'Mode', status: 'Success', details: `Manual entry added: ${description || 'No description'}` });
       const redir = handleRedirect('/tracker', 'Manual entry added');
@@ -132,7 +134,7 @@ if (Astro.request.method === 'POST') {
   }
 }
 
-const manualEntries = await getManualEntries(user.id);
+const manualEntries = await getManualEntries(user.id, settings.isEmployee);
 
 const startDateParam = Astro.url.searchParams.get('startDate') || '';
 const endDateParam = Astro.url.searchParams.get('endDate') || '';

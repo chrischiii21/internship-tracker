@@ -37,6 +37,12 @@ CREATE TABLE IF NOT EXISTS public.student_settings (
     pay_type TEXT DEFAULT 'hourly' CHECK (pay_type IN ('hourly', 'daily')),
     pay_schedule TEXT DEFAULT 'monthly' CHECK (pay_schedule IN ('weekly', 'semi-monthly', 'monthly')),
     
+    is_employee BOOLEAN NOT NULL DEFAULT FALSE,
+    monthly_rate NUMERIC DEFAULT 0,
+    employee_start_date DATE,
+    employer_company TEXT,
+    employee_pay_schedule TEXT DEFAULT 'monthly',
+    
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -49,6 +55,7 @@ CREATE TABLE IF NOT EXISTS public.entries (
     start_time TIMESTAMP WITH TIME ZONE NOT NULL,
     end_time TIMESTAMP WITH TIME ZONE NOT NULL,
     duration_seconds INTEGER NOT NULL CHECK (duration_seconds >= 0),
+    is_employee BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -58,6 +65,7 @@ CREATE TABLE IF NOT EXISTS public.active_timers (
     user_id TEXT PRIMARY KEY, -- Google ID string
     description TEXT,
     start_time TIMESTAMP WITH TIME ZONE NOT NULL,
+    is_employee BOOLEAN NOT NULL DEFAULT FALSE,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 

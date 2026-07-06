@@ -41,12 +41,22 @@ export const POST: APIRoute = async ({ request }) => {
     const supervisor = formData.get('supervisor') as string || existingSettings.supervisor;
     const supervisorPosition = formData.get('supervisorPosition') as string || existingSettings.supervisorPosition;
     
-    // Handle hasAllowance (checkbox logic: if present in formData it's true, if form submitted but missing it's false, if form not submitted it's existing)
-    // NOTE: This assumes that if 'program' or 'hostCompany' is present, the OJT/Program form was submitted.
-    const isProgramForm = formData.has('program') || formData.has('hasAllowance');
-    let hasAllowance = existingSettings.hasAllowance;
+    // Employee config extraction
+    const isProgramForm = formData.has('program') || formData.has('hasAllowance') || formData.has('isEmployee');
+    let isEmployee = existingSettings.isEmployee;
     if (isProgramForm) {
+      isEmployee = formData.get('isEmployee') === 'true';
+    }
+
+    const rawMonthlyRate = formData.get('monthlyRate');
+    const monthlyRate = rawMonthlyRate ? parseFloat(rawMonthlyRate as string) : existingSettings.monthlyRate;
+
+    // Handle hasAllowance (checkbox logic: if present in formData it's true, if form submitted but missing it's false, if form not submitted it's existing)
+    let hasAllowance = existingSettings.hasAllowance;
+    if (isProgramForm && !isEmployee) {
       hasAllowance = formData.get('hasAllowance') === 'true';
+    } else if (isEmployee) {
+      hasAllowance = false;
     }
 
     const payType = (formData.get('payType') as 'hourly' | 'daily') || existingSettings.payType;
@@ -56,7 +66,7 @@ export const POST: APIRoute = async ({ request }) => {
     let sectionId = existingSettings.sectionId;
     const isUnlink = formData.get('unlink') === 'true';
 
-    if (isUnlink) {
+    if (isUnlink || isEmployee) {
       coordinatorId = null as any;
       sectionId = null as any;
     } else if (role === 'student' && coordinatorInvite) {
@@ -78,10 +88,16 @@ export const POST: APIRoute = async ({ request }) => {
       }
     }
 
-    // Only validate OJT fields if user is a student and it's a full setup/update
+    // Only validate fields if user is a student and it's a full setup/update
     if (role === 'student' && setupComplete && isProgramForm) {
-      if (!startDate || isNaN(targetHours) || isNaN(hourlyRate)) {
-        throw new Error('Invalid data for student profile. Please ensure all required fields are filled.');
+      if (isEmployee) {
+        if (!startDate || isNaN(monthlyRate)) {
+          throw new Error('Invalid data for employee profile. Please ensure employment start date and monthly rate are filled.');
+        }
+      } else {
+        if (!startDate || isNaN(targetHours) || isNaN(hourlyRate)) {
+          throw new Error('Invalid data for student profile. Please ensure all required fields are filled.');
+        }
       }
     }
 
@@ -92,23 +108,38 @@ export const POST: APIRoute = async ({ request }) => {
       clockifyEnabled = true;
     }
 
+    let employeeStartDate = existingSettings.employeeStartDate;
+    let employerCompany = existingSettings.employerCompany;
+    let employeePaySchedule = existingSettings.employeePaySchedule;
+
+    if (isEmployee) {
+      employeeStartDate = formData.get('startDate') as string || existingSettings.employeeStartDate;
+      employerCompany = formData.get('hostCompany') as string || existingSettings.employerCompany;
+      employeePaySchedule = formData.get('paySchedule') as 'semi-monthly' | 'monthly' || existingSettings.employeePaySchedule;
+    }
+
     await saveAppSettings(session.id, { 
-      startDate, 
-      targetHours: isNaN(targetHours) ? undefined : targetHours, 
-      hourlyRate: isNaN(hourlyRate) ? undefined : hourlyRate, 
+      startDate: isEmployee ? existingSettings.startDate : startDate, 
+      targetHours: isEmployee ? existingSettings.targetHours : (isNaN(targetHours) ? undefined : targetHours), 
+      hourlyRate: isEmployee ? existingSettings.hourlyRate : (isNaN(hourlyRate) ? undefined : hourlyRate), 
       setupComplete: setupComplete || existingSettings.setupComplete,
-      program,
-      hostCompany,
-      supervisor,
-      supervisorPosition,
-      hasAllowance,
-      payType,
-      paySchedule,
+      program: isEmployee ? existingSettings.program : program,
+      hostCompany: isEmployee ? existingSettings.hostCompany : hostCompany,
+      supervisor: isEmployee ? existingSettings.supervisor : supervisor,
+      supervisorPosition: isEmployee ? existingSettings.supervisorPosition : supervisorPosition,
+      hasAllowance: isEmployee ? existingSettings.hasAllowance : hasAllowance,
+      payType: isEmployee ? existingSettings.payType : payType,
+      paySchedule: isEmployee ? existingSettings.paySchedule : paySchedule,
       role,
       inviteCode: role === 'coordinator' ? ((inviteCode || existingSettings.inviteCode)?.toUpperCase()) : undefined,
-      coordinatorId,
-      sectionId,
+      coordinatorId: isEmployee ? existingSettings.coordinatorId : coordinatorId,
+      sectionId: isEmployee ? existingSettings.sectionId : sectionId,
       clockifyEnabled,
+      isEmployee,
+      monthlyRate: isNaN(monthlyRate) ? undefined : monthlyRate,
+      employeeStartDate,
+      employerCompany,
+      employeePaySchedule,
       userName: session.name,
       userEmail: session.email,
       userPicture: session.picture

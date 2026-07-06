@@ -105,8 +105,8 @@ dtrData = result.days.reduce((acc, d) => {
 totalMonthSeconds = result.totalMonthlyHours * 3600;
 
 // Calculate overall progress for the percentage display
-const overallRenderedHours = await getStudentProgress(viewUserId, settings.userEmail || "", settings.startDate);
-const progressPercent = Math.min(100, (overallRenderedHours / (settings.targetHours || 1)) * 100).toFixed(1);
+const overallRenderedHours = settings.isEmployee ? 0 : await getStudentProgress(viewUserId, settings.userEmail || "", settings.startDate);
+const progressPercent = settings.isEmployee ? "0" : Math.min(100, (overallRenderedHours / (settings.targetHours || 1)) * 100).toFixed(1);
 
 const formatDuration = (seconds: number) => {
   const h = Math.floor(seconds / 3600);
@@ -118,10 +118,11 @@ const monthName = new Date(year, month - 1)
   .toLocaleDateString("en-US", { month: "long", timeZone: "Asia/Manila" })
   .toUpperCase();
 
-const needsUpdate =
-  (settings.program?.includes("Enter") ?? true) ||
-  (settings.hostCompany?.includes("Enter") ?? true) ||
-  (settings.supervisor?.includes("Enter") ?? true);
+const needsUpdate = settings.isEmployee 
+  ? (!settings.hostCompany || settings.hostCompany.includes("Enter"))
+  : ((settings.program?.includes("Enter") ?? true) ||
+     (settings.hostCompany?.includes("Enter") ?? true) ||
+     (settings.supervisor?.includes("Enter") ?? true));
 ---
 
 <Layout title="DTR Sheet">
@@ -231,7 +232,7 @@ const needsUpdate =
           <button
             id="download-pdf-btn"
             class="download-btn"
-            data-filename={`DTR_${settings.userName?.replace(/\s+/g, "_") || "Student"}_${monthName}_${year}.pdf`}
+            data-filename={`DTR_${settings.userName?.replace(/\s+/g, "_") || (settings.isEmployee ? "Employee" : "Student")}_${monthName}_${year}.pdf`}
           >
             <svg
               width="16"
@@ -251,29 +252,33 @@ const needsUpdate =
       <div class="dtr-scroll-wrapper content-center">
         <div class="dtr-container" id="dtr-sheet">
           <header class="dtr-header">
-            <div class="dtr-title">OJT DAILY TIME RECORD</div>
+            <div class="dtr-title">{settings.isEmployee ? "DAILY TIME RECORD" : "OJT DAILY TIME RECORD"}</div>
 
             <div class="dtr-info-grid">
               <div class="info-item">
-                <span class="label">OJT Student:</span>
+                <span class="label">{settings.isEmployee ? "Employee Name:" : "OJT Student:"}</span>
                 <span class="value underline">{settings.userName}</span>
               </div>
+              {!settings.isEmployee && (
+                <div class="info-item">
+                  <span class="label">Program:</span>
+                  <span class="value underline">{settings.program}</span>
+                </div>
+              )}
               <div class="info-item">
-                <span class="label">Program:</span>
-                <span class="value underline">{settings.program}</span>
-              </div>
-              <div class="info-item">
-                <span class="label">Company:</span>
+                <span class="label">{settings.isEmployee ? "Employer / Company:" : "Company:"}</span>
                 <span class="value underline">{settings.hostCompany}</span>
               </div>
               <div class="info-item">
                 <span class="label">Period:</span>
                 <span class="value underline">{monthName} {year}</span>
               </div>
-              <div class="info-item">
-                <span class="label">Supervisor:</span>
-                <span class="value underline">{settings.supervisor}</span>
-              </div>
+              {!settings.isEmployee && (
+                <div class="info-item">
+                  <span class="label">Supervisor:</span>
+                  <span class="value underline">{settings.supervisor}</span>
+                </div>
+              )}
               <div class="info-item highlight">
                 <span class="label">Total Hours:</span>
                 <span class="value">{formatDuration(totalMonthSeconds)}</span>
@@ -318,7 +323,7 @@ const needsUpdate =
 
           <footer class="dtr-footer">
             <div class="certification">
-              Student Certification: I certify that I rendered the above
+              {settings.isEmployee ? "Employee Certification:" : "Student Certification:"} I certify that I rendered the above
               service.
             </div>
             <div class="sig-lines">
@@ -334,18 +339,20 @@ const needsUpdate =
 
             <div class="approval">VERIFIED & APPROVED:</div>
             <div class="sig-lines">
-              <div class="sig-group full">
-                <span class="sig-label">Supervisor Signature:</span>
+              <div class="sig-group {settings.isEmployee ? '' : 'full'}">
+                <span class="sig-label">{settings.isEmployee ? "Supervisor / Manager Signature:" : "Supervisor Signature:"}</span>
                 <div class="sig-underline"></div>
               </div>
               <div class="sig-group">
                 <span class="sig-label">Date:</span>
                 <div class="sig-underline"></div>
               </div>
-              <div class="sig-group">
-                <span class="sig-label">Position:</span>
-                <span class="value">{settings.supervisorPosition}</span>
-              </div>
+              {!settings.isEmployee && (
+                <div class="sig-group">
+                  <span class="sig-label">Position:</span>
+                  <span class="value">{settings.supervisorPosition}</span>
+                </div>
+              )}
             </div>
           </footer>
         </div>
