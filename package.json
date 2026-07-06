@@ -15,11 +15,17 @@
     "@astrojs/node": "^10.0.6",
     "@astrojs/vercel": "^10.0.6",
     "@aws-sdk/client-s3": "^3.1075.0",
+    "@capacitor/android": "^8.4.1",
+    "@capacitor/core": "^8.4.1",
+    "@capacitor/ios": "^8.4.1",
     "@supabase/supabase-js": "^2.105.1",
     "astro": "^6.2.1",
     "cookie": "^1.1.1",
     "googleapis": "^171.4.0",
     "html2pdf.js": "^0.14.0",
     "tailwindcss": "^4.2.4"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.4.1"
   }
 }

@@ -1,0 +1,51 @@
+name: Build iOS IPA
+
+on:
+  workflow_dispatch: # Allows you to trigger the build manually from GitHub
+
+jobs:
+  build_ios:
+    name: Build iOS App
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+
+      - name: Install Dependencies
+        run: bun install
+
+      - name: Build Web App
+        run: bun run build
+
+      - name: Sync Capacitor iOS
+        run: bunx cap sync ios
+
+      - name: Build Unsigned iOS App
+        run: |
+          # Build the Xcode project without code signing
+          xcodebuild -workspace ios/App/App.xcworkspace \
+                     -scheme App \
+                     -configuration Release \
+                     -sdk iphoneos \
+                     CODE_SIGNING_ALLOWED=NO \
+                     CODE_SIGN_IDENTITY="" \
+                     CODE_SIGNING_REQUIRED=NO \
+                     build \
+                     -derivedDataPath build
+          
+          # Package the .app into a Payload folder to create an .ipa
+          mkdir -p build/Payload
+          mv build/Build/Products/Release-iphoneos/App.app build/Payload/
+          cd build
+          zip -qr app.ipa Payload
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-app-artifact
+          path: build/app.ipa
+          retention-days: 3
