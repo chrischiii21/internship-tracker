@@ -62,6 +62,8 @@ export async function addManualEntry(entry: { userId: string, description: strin
   
   if (end < start) throw new Error('End time must be after start time');
   
+  const durationSeconds = (end.getTime() - start.getTime()) / 1000;
+  
   const { data, error } = await supabase
     .from('entries')
     .insert({

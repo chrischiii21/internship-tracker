@@ -83,7 +83,7 @@ let dtrData: any = {};
 let totalMonthSeconds = 0;
 
 // Unified Logic: Combined Manual + Clockify
-const manual = await getManualEntries(viewUserId);
+const manual = await getManualEntries(viewUserId, settings.isEmployee ?? false);
 const manualFiltered = manual.filter((e) => {
   const d = new Date(e.startFull || `${e.date}T${e.startTime}+08:00`);
   return d.getMonth() + 1 === month && d.getFullYear() === year;
@@ -123,6 +123,8 @@ const needsUpdate = settings.isEmployee
   : ((settings.program?.includes("Enter") ?? true) ||
      (settings.hostCompany?.includes("Enter") ?? true) ||
      (settings.supervisor?.includes("Enter") ?? true));
+
+const isEditable = user.id === viewUserId || mySettings.role === "coordinator";
 ---
 
 <Layout title="DTR Sheet">
@@ -250,7 +252,13 @@ const needsUpdate = settings.isEmployee
       </div>
 
       <div class="dtr-scroll-wrapper content-center">
-        <div class="dtr-container" id="dtr-sheet">
+        <div 
+          class="dtr-container" 
+          id="dtr-sheet"
+          data-user-id={viewUserId}
+          data-year={year}
+          data-month={month}
+        >
           <header class="dtr-header">
             <div class="dtr-title">{settings.isEmployee ? "DAILY TIME RECORD" : "OJT DAILY TIME RECORD"}</div>
 
@@ -281,7 +289,7 @@ const needsUpdate = settings.isEmployee
               )}
               <div class="info-item highlight">
                 <span class="label">Total Hours:</span>
-                <span class="value">{formatDuration(totalMonthSeconds)}</span>
+                <span class="value" id="total-monthly-hours-val">{formatDuration(totalMonthSeconds)}</span>
               </div>
             </div>
           </header>
@@ -304,13 +312,65 @@ const needsUpdate = settings.isEmployee
             <tbody>
               {
                 Object.entries(dtrData).map(([day, data]: [string, any]) => (
-                  <tr class={data.totalSeconds === 0 ? "weekend-row" : ""}>
+                  <tr class={data.totalSeconds === 0 ? "weekend-row" : ""} data-day={day}>
                     <td class="date-col">{day}</td>
-                    <td>{data.amIn}</td>
-                    <td>{data.amOut}</td>
-                    <td>{data.pmIn}</td>
-                    <td>{data.pmOut}</td>
-                    <td class="total-col">
+                    <td class={isEditable ? "editable-cell" : ""}>
+                      {isEditable ? (
+                        <input
+                          type="text"
+                          class="dtr-grid-input"
+                          value={data.amIn || ""}
+                          placeholder="--"
+                          data-day={day}
+                          data-col="amIn"
+                        />
+                      ) : (
+                        data.amIn || ""
+                      )}
+                    </td>
+                    <td class={isEditable ? "editable-cell" : ""}>
+                      {isEditable ? (
+                        <input
+                          type="text"
+                          class="dtr-grid-input"
+                          value={data.amOut || ""}
+                          placeholder="--"
+                          data-day={day}
+                          data-col="amOut"
+                        />
+                      ) : (
+                        data.amOut || ""
+                      )}
+                    </td>
+                    <td class={isEditable ? "editable-cell" : ""}>
+                      {isEditable ? (
+                        <input
+                          type="text"
+                          class="dtr-grid-input"
+                          value={data.pmIn || ""}
+                          placeholder="--"
+                          data-day={day}
+                          data-col="pmIn"
+                        />
+                      ) : (
+                        data.pmIn || ""
+                      )}
+                    </td>
+                    <td class={isEditable ? "editable-cell" : ""}>
+                      {isEditable ? (
+                        <input
+                          type="text"
+                          class="dtr-grid-input"
+                          value={data.pmOut || ""}
+                          placeholder="--"
+                          data-day={day}
+                          data-col="pmOut"
+                        />
+                      ) : (
+                        data.pmOut || ""
+                      )}
+                    </td>
+                    <td class="total-col row-total">
                       {data.totalSeconds > 0
                         ? formatDuration(data.totalSeconds)
                         : ""}
@@ -438,6 +498,190 @@ const needsUpdate = settings.isEmployee
         window.showToast("PDF generator library is not loaded. Please try again.", "error");
       }
     }
+  });
+
+  // Excel-like DTR Edit and Navigation Logic
+  const dtrSheet = document.getElementById("dtr-sheet");
+  const userId = dtrSheet?.getAttribute("data-user-id");
+  const year = parseInt(dtrSheet?.getAttribute("data-year") || "0");
+  const month = parseInt(dtrSheet?.getAttribute("data-month") || "0");
+
+  function parseTimeInput(val) {
+    if (!val || !val.trim()) return null;
+    val = val.trim().toLowerCase();
+    
+    const match = val.match(/^(\d{1,2})(?::(\d{2}))?\s*([ap]m|[ap])?$/);
+    if (!match) return null;
+    
+    let hours = parseInt(match[1]);
+    let minutes = parseInt(match[2] || '0');
+    let ampm = match[3];
+    
+    if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+    
+    if (ampm) {
+      if (ampm.startsWith('p') && hours < 12) {
+        hours += 12;
+      } else if (ampm.startsWith('a') && hours === 12) {
+        hours = 0;
+      }
+    } else {
+      if (hours >= 1 && hours <= 6) {
+        hours += 12;
+      }
+    }
+    
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+  }
+
+  function formatTime12(time24) {
+    if (!time24) return '';
+    const [hStr, mStr] = time24.split(':');
+    let h = parseInt(hStr);
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    h = h % 12;
+    if (h === 0) h = 12;
+    return `${h}:${mStr} ${ampm}`;
+  }
+
+  const inputs = Array.from(document.querySelectorAll('.dtr-grid-input'));
+  
+  inputs.forEach(input => {
+    input.addEventListener('focus', () => {
+      input.dataset.original = input.value;
+    });
+
+    input.addEventListener('blur', async () => {
+      const rawVal = input.value.trim();
+      const originalRaw = input.dataset.original || '';
+      
+      if (rawVal === originalRaw) return;
+
+      const day = parseInt(input.getAttribute('data-day') || '0');
+      const col = input.getAttribute('data-col') || '';
+
+      let parsedTime = null;
+      if (rawVal !== '') {
+        parsedTime = parseTimeInput(rawVal);
+        if (!parsedTime) {
+          if (window.showToast) {
+            window.showToast(`Invalid time format: "${rawVal}"`, 'error');
+          }
+          input.value = originalRaw;
+          return;
+        }
+        input.value = formatTime12(parsedTime);
+      }
+
+      const amInVal = document.querySelector(`.dtr-grid-input[data-day="${day}"][data-col="amIn"]`)?.value || '';
+      const amOutVal = document.querySelector(`.dtr-grid-input[data-day="${day}"][data-col="amOut"]`)?.value || '';
+      const pmInVal = document.querySelector(`.dtr-grid-input[data-day="${day}"][data-col="pmIn"]`)?.value || '';
+      const pmOutVal = document.querySelector(`.dtr-grid-input[data-day="${day}"][data-col="pmOut"]`)?.value || '';
+
+      const amIn24 = amInVal ? parseTimeInput(amInVal) : null;
+      const amOut24 = amOutVal ? parseTimeInput(amOutVal) : null;
+      const pmIn24 = pmInVal ? parseTimeInput(pmInVal) : null;
+      const pmOut24 = pmOutVal ? parseTimeInput(pmOutVal) : null;
+
+      const row = input.closest('tr');
+      row?.classList.add('row-saving');
+
+      try {
+        const response = await fetch('/api/dtr/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId,
+            year,
+            month,
+            day,
+            amIn: amIn24,
+            amOut: amOut24,
+            pmIn: pmIn24,
+            pmOut: pmOut24
+          })
+        });
+
+        const resData = await response.json();
+        if (!response.ok || resData.error) {
+          throw new Error(resData.error || 'Failed to save entry');
+        }
+
+        const rowTotalCell = row?.querySelector('.row-total');
+        if (rowTotalCell) {
+          if (resData.dayTotalSeconds > 0) {
+            const h = Math.floor(resData.dayTotalSeconds / 3600);
+            const m = Math.floor((resData.dayTotalSeconds % 3600) / 60);
+            rowTotalCell.textContent = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+            row?.classList.remove('weekend-row');
+          } else {
+            rowTotalCell.textContent = '';
+            row?.classList.add('weekend-row');
+          }
+        }
+
+        const totalHeaderVal = document.getElementById('total-monthly-hours-val');
+        if (totalHeaderVal) {
+          const h = Math.floor(resData.totalMonthSeconds / 3600);
+          const m = Math.floor((resData.totalMonthSeconds % 3600) / 60);
+          totalHeaderVal.textContent = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+        }
+
+        input.dataset.original = input.value;
+        if (window.showToast) {
+          window.showToast(`Day ${day} record saved successfully`, 'success');
+        }
+      } catch (err) {
+        console.error(err);
+        if (window.showToast) {
+          window.showToast(err.message || 'Error saving log', 'error');
+        }
+        input.value = originalRaw;
+      } finally {
+        row?.classList.remove('row-saving');
+      }
+    });
+
+    input.addEventListener('keydown', (e) => {
+      const col = input.getAttribute('data-col');
+      const day = parseInt(input.getAttribute('data-day') || '0');
+      let nextInput = null;
+
+      if (e.key === 'ArrowDown' || e.key === 'Enter') {
+        e.preventDefault();
+        nextInput = document.querySelector(`.dtr-grid-input[data-day="${day + 1}"][data-col="${col}"]`);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        nextInput = document.querySelector(`.dtr-grid-input[data-day="${day - 1}"][data-col="${col}"]`);
+      } else if (e.key === 'ArrowRight') {
+        if (input.selectionStart === input.value.length) {
+          e.preventDefault();
+          const colOrder = ['amIn', 'amOut', 'pmIn', 'pmOut'];
+          const nextColIdx = colOrder.indexOf(col) + 1;
+          if (nextColIdx < colOrder.length) {
+            nextInput = document.querySelector(`.dtr-grid-input[data-day="${day}"][data-col="${colOrder[nextColIdx]}"]`);
+          } else {
+            nextInput = document.querySelector(`.dtr-grid-input[data-day="${day + 1}"][data-col="${colOrder[0]}"]`);
+          }
+        }
+      } else if (e.key === 'ArrowLeft') {
+        if (input.selectionStart === 0) {
+          e.preventDefault();
+          const colOrder = ['amIn', 'amOut', 'pmIn', 'pmOut'];
+          const prevColIdx = colOrder.indexOf(col) - 1;
+          if (prevColIdx >= 0) {
+            nextInput = document.querySelector(`.dtr-grid-input[data-day="${day}"][data-col="${colOrder[prevColIdx]}"]`);
+          } else {
+            nextInput = document.querySelector(`.dtr-grid-input[data-day="${day - 1}"][data-col="${colOrder[colOrder.length - 1]}"]`);
+          }
+        }
+      }
+
+      if (nextInput) {
+        nextInput.focus();
+        nextInput.select();
+      }
+    });
   });
 </script>
 
@@ -668,8 +912,38 @@ const needsUpdate = settings.isEmployee
     border: 1px solid #9ca3af;
     padding: 2px 8px;
     font-size: 11px;
-    height: 17px;
+    height: 24px;
     text-align: center;
+  }
+  .dtr-table td.editable-cell {
+    padding: 0;
+  }
+  .dtr-grid-input {
+    width: 100%;
+    height: 100%;
+    border: none;
+    background: transparent;
+    text-align: center;
+    font-family: inherit;
+    font-size: 11px;
+    color: inherit;
+    padding: 2px 8px;
+    box-sizing: border-box;
+    cursor: cell;
+    transition: all 0.15s ease;
+  }
+  .dtr-grid-input::placeholder {
+    color: #cbd5e1;
+  }
+  .dtr-grid-input:focus {
+    outline: none;
+    background: #f0fdf4;
+    box-shadow: inset 0 0 0 2px #22c55e;
+    color: #15803d;
+    font-weight: 600;
+  }
+  .row-saving {
+    background-color: rgba(251, 191, 36, 0.15) !important;
   }
   .date-col {
     font-weight: 700;
@@ -788,6 +1062,20 @@ const needsUpdate = settings.isEmployee
       border-width: 2px;
     }
     .dtr-table td {
+      padding: 2px 8px !important;
+      height: 17px !important;
+    }
+    .dtr-grid-input {
+      border: none !important;
+      background: transparent !important;
+      box-shadow: none !important;
+      padding: 0 !important;
+      color: black !important;
+      height: auto !important;
+      font-size: 10px !important;
+    }
+    .dtr-grid-input::placeholder {
+      color: transparent !important;
     }
 
     .dtr-footer {

@@ -180,7 +180,10 @@ export async function getDailyDTR(clockifyUserId: string, month: number, year: n
 
     if (firstStartH >= 12) {
       dtr[d].pmIn = format12(dayLogs[0].start);
-      dtr[d].pmOut = format12(dayLogs[dayLogs.length - 1].end);
+      const lastLog = dayLogs[dayLogs.length - 1];
+      if (lastLog.start.getTime() !== lastLog.end.getTime()) {
+        dtr[d].pmOut = format12(lastLog.end);
+      }
     } else {
       let lunchBreakIndex = -1;
       let maxGap = 0;
@@ -206,18 +209,28 @@ export async function getDailyDTR(clockifyUserId: string, month: number, year: n
 
       if (lunchBreakIndex !== -1) {
         dtr[d].amIn = format12(dayLogs[0].start);
-        dtr[d].amOut = format12(dayLogs[lunchBreakIndex].end);
+        const amOutLog = dayLogs[lunchBreakIndex];
+        if (amOutLog.start.getTime() !== amOutLog.end.getTime()) {
+          dtr[d].amOut = format12(amOutLog.end);
+        }
+        
         dtr[d].pmIn = format12(dayLogs[lunchBreakIndex + 1].start);
-        dtr[d].pmOut = format12(dayLogs[dayLogs.length - 1].end);
+        const pmOutLog = dayLogs[dayLogs.length - 1];
+        if (pmOutLog.start.getTime() !== pmOutLog.end.getTime()) {
+          dtr[d].pmOut = format12(pmOutLog.end);
+        }
       } else {
         dtr[d].amIn = format12(dayLogs[0].start);
-        const lastEnd = dayLogs[dayLogs.length - 1].end;
-        const lastEndH = parseInt(new Intl.DateTimeFormat('en-US', { hour: 'numeric', hour12: false, timeZone: 'Asia/Manila' }).format(lastEnd));
-        
-        if (lastEndH >= 13) {
-          dtr[d].pmOut = format12(lastEnd);
-        } else {
-          dtr[d].amOut = format12(lastEnd);
+        const lastEndLog = dayLogs[dayLogs.length - 1];
+        if (lastEndLog.start.getTime() !== lastEndLog.end.getTime()) {
+          const lastEnd = lastEndLog.end;
+          const lastEndH = parseInt(new Intl.DateTimeFormat('en-US', { hour: 'numeric', hour12: false, timeZone: 'Asia/Manila' }).format(lastEnd));
+          
+          if (lastEndH >= 13) {
+            dtr[d].pmOut = format12(lastEnd);
+          } else {
+            dtr[d].amOut = format12(lastEnd);
+          }
         }
       }
     }
