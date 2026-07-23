@@ -112,8 +112,8 @@ export async function saveAppSettings(userId: string, updated: Partial<AppSettin
   if (updated.role === 'coordinator') {
     // Delete from student table if they switched (unlikely but safe)
     await supabase.from('student_settings').delete().eq('user_id', userId);
-    
-    return await supabase
+
+    const { error } = await supabase
       .from('coordinator_settings')
       .upsert({
         user_id: userId,
@@ -123,11 +123,12 @@ export async function saveAppSettings(userId: string, updated: Partial<AppSettin
         invite_code: updated.inviteCode,
         updated_at: new Date().toISOString()
       });
+    if (error) throw new Error(error.message);
   } else {
     // Delete from coordinator table if they switched
     await supabase.from('coordinator_settings').delete().eq('user_id', userId);
 
-    return await supabase
+    const { error } = await supabase
       .from('student_settings')
       .upsert({
         user_id: userId,
@@ -155,5 +156,6 @@ export async function saveAppSettings(userId: string, updated: Partial<AppSettin
         employee_pay_schedule: updated.employeePaySchedule,
         updated_at: new Date().toISOString()
       });
+    if (error) throw new Error(error.message);
   }
 }
