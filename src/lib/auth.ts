@@ -98,7 +98,10 @@ export async function deleteAccount(userId: string) {
   // Delete all user-related data in order to respect any constraints
   await supabase.from('entries').delete().eq('user_id', userId);
   await supabase.from('active_timers').delete().eq('user_id', userId);
-  
+  await supabase.from('attendance_overrides').delete().eq('user_id', userId);
+  await supabase.from('attendance_config').delete().eq('user_id', userId);
+  await supabase.from('attendance_holidays').delete().eq('user_id', userId);
+
   // Attempt to delete from all possible settings tables
   await supabase.from('student_settings').delete().eq('user_id', userId);
   await supabase.from('coordinator_settings').delete().eq('user_id', userId);

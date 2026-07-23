@@ -9,6 +9,7 @@ import { getClockifyUser, getClockifyDetailedEntries } from '../lib/clockify';
 
 import { getAppSettings } from '../lib/settings';
 import { formatHours, formatHMS } from '../lib/utils';
+import { getOverridesInRange } from '../lib/attendance';
 
 const cookieHeader = Astro.request.headers.get('cookie') || '';
 const cookies = parse(cookieHeader);
@@ -141,10 +142,49 @@ const endDateParam = Astro.url.searchParams.get('endDate') || '';
 const sourceParam = Astro.url.searchParams.get('source') || 'all';
 
 // Merge manual entries and Clockify entries
-const allEntries = [
+const realEntries = [
   ...manualEntries.map(e => ({ ...e, type: 'manual' as const })),
   ...clockifyEntries.map(e => ({ ...e, type: 'clockify' as const }))
 ];
+
+// Days marked in the Attendance Chart with no actual time logged yet still show up here as their
+// own log entries instead of a separate reminder banner. Present/WFH are "actionable" (you claimed
+// you worked, log the real hours); Absent/SL/VL are informational only — no log is expected for those.
+const todayManila = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
+const attendanceRangeStart = startDateParam || activeStartDate || todayManila;
+const attendanceRangeEnd = endDateParam && endDateParam < todayManila ? endDateParam : todayManila;
+const statusLabels: Record<string, string> = { absent: 'Absent', wfh: 'WFH', sl: 'Sick Leave', vl: 'Vacation Leave', present: 'Present' };
+const ACTIONABLE_STATUSES = new Set(['present', 'wfh']);
+
+let attendanceEntries: any[] = [];
+if (attendanceRangeStart <= attendanceRangeEnd) {
+  const attendanceOverrides = await getOverridesInRange(user.id, settings.isEmployee ?? false, attendanceRangeStart, attendanceRangeEnd);
+  const loggedDates = new Set(realEntries.map(e => e.date));
+  attendanceEntries = attendanceOverrides
+    .filter(o => !loggedDates.has(o.date))
+    .map(o => {
+      const isActionable = ACTIONABLE_STATUSES.has(o.status);
+      return {
+        id: `attendance-${o.date}`,
+        userId: user.id,
+        description: isActionable
+          ? `Marked ${statusLabels[o.status] || o.status} in Attendance Chart`
+          : `${statusLabels[o.status] || o.status}`,
+        date: o.date,
+        startTime: '00:00',
+        endTime: '00:00',
+        durationSeconds: 0,
+        startFull: `${o.date}T00:00:00+08:00`,
+        endFull: `${o.date}T00:00:00+08:00`,
+        documentationUrls: [] as string[],
+        type: 'attendance' as const,
+        attendanceStatus: o.status,
+        isActionable,
+      };
+    });
+}
+
+const allEntries = [...realEntries, ...attendanceEntries];
 
 let filteredEntries = allEntries;
 if (startDateParam) {
@@ -344,7 +384,7 @@ const formatTo24hr = (timeStr: string) => {
                 </div>
               </div>
             )}
-            
+
 
 
             <!-- Metrics & History Grid -->
@@ -477,46 +517,76 @@ const formatTo24hr = (timeStr: string) => {
                                   </div>
                                   <div class="shift-list">
                                     {dateGroup.entries.map(entry => (
-                                      <div class="shift-item">
-                                        <div class="shift-info">
-                                          <div class="shift-title-row">
-                                            <span class="shift-title">{entry.description || 'General Work'}</span>
-                                            {userInClockify && (
-                                              <span class={`source-badge ${entry.type}`}>
-                                                {entry.type === 'clockify' ? 'Clockify' : 'Manual'}
+                                      entry.type === 'attendance' ? (
+                                        <div class={`shift-item attendance-marker-item ${entry.isActionable ? 'actionable' : 'informational'}`}>
+                                          <div class="shift-info">
+                                            <div class="shift-title-row">
+                                              <span class="shift-title">{entry.description}</span>
+                                              <span class={`source-badge attendance status-${entry.attendanceStatus}`}>
+                                                {entry.isActionable ? 'No time log' : statusLabels[entry.attendanceStatus] || entry.attendanceStatus}
                                               </span>
-                                            )}
-                                            {entry.documentationUrls && entry.documentationUrls.length > 0 && (
-                                              <span class="proof-badge" title={`${entry.documentationUrls.length} image proof files attached`}>
-                                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-right: 4px; display: inline-block; vertical-align: middle;"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-                                                {entry.documentationUrls.length}
+                                            </div>
+                                            <div class="shift-sub">
+                                              <span class="time attendance-hint">
+                                                {entry.isActionable ? 'Log the actual hours worked, if any' : 'No time log expected'}
                                               </span>
-                                            )}
+                                            </div>
                                           </div>
-                                          <div class="shift-sub">
-                                            <span class="time">{formatTo24hr(entry.startTime)} — {formatTo24hr(entry.endTime)}</span>
+                                          {entry.isActionable && (
+                                            <div class="shift-actions">
+                                              <button
+                                                type="button"
+                                                class="log-time-btn"
+                                                data-date={entry.date}
+                                                data-status={statusLabels[entry.attendanceStatus] || entry.attendanceStatus}
+                                              >
+                                                Log time
+                                              </button>
+                                            </div>
+                                          )}
+                                        </div>
+                                      ) : (
+                                        <div class="shift-item">
+                                          <div class="shift-info">
+                                            <div class="shift-title-row">
+                                              <span class="shift-title">{entry.description || 'General Work'}</span>
+                                              {userInClockify && (
+                                                <span class={`source-badge ${entry.type}`}>
+                                                  {entry.type === 'clockify' ? 'Clockify' : 'Manual'}
+                                                </span>
+                                              )}
+                                              {entry.documentationUrls && entry.documentationUrls.length > 0 && (
+                                                <span class="proof-badge" title={`${entry.documentationUrls.length} image proof files attached`}>
+                                                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-right: 4px; display: inline-block; vertical-align: middle;"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                                                  {entry.documentationUrls.length}
+                                                </span>
+                                              )}
+                                            </div>
+                                            <div class="shift-sub">
+                                              <span class="time">{formatTo24hr(entry.startTime)} — {formatTo24hr(entry.endTime)}</span>
+                                            </div>
+                                          </div>
+                                          <div class="shift-actions">
+                                            <span class="shift-hours">{formatHours(entry.durationSeconds / 3600)}</span>
+                                            <div class="action-group">
+                                              <button
+                                                type="button"
+                                                class="info-icon-btn"
+                                                title="View Details & Proof"
+                                                data-id={entry.id}
+                                                data-desc={entry.description || 'General Work'}
+                                                data-date={entry.date}
+                                                data-start={entry.startTime}
+                                                data-end={entry.endTime}
+                                                data-urls={JSON.stringify(entry.documentationUrls || [])}
+                                                data-type={entry.type}
+                                              >
+                                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+                                              </button>
+                                            </div>
                                           </div>
                                         </div>
-                                        <div class="shift-actions">
-                                          <span class="shift-hours">{formatHours(entry.durationSeconds / 3600)}</span>
-                                          <div class="action-group">
-                                            <button 
-                                              type="button" 
-                                              class="info-icon-btn" 
-                                              title="View Details & Proof"
-                                              data-id={entry.id}
-                                              data-desc={entry.description || 'General Work'}
-                                              data-date={entry.date}
-                                              data-start={entry.startTime}
-                                              data-end={entry.endTime}
-                                              data-urls={JSON.stringify(entry.documentationUrls || [])}
-                                              data-type={entry.type}
-                                            >
-                                              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
-                                            </button>
-                                          </div>
-                                        </div>
-                                      </div>
+                                      )
                                     ))}
                                   </div>
                                 </div>
@@ -569,18 +639,18 @@ const formatTo24hr = (timeStr: string) => {
                   </div>
                 </div>
 
-                <div class="manual-add-box">
+                <div class="manual-add-box" id="manual-add-box">
                   <h3 class="box-title">Manual Adjustment</h3>
-                  <form method="POST" class="side-form">
+                  <form method="POST" class="side-form" id="manual-add-form">
                     <input type="hidden" name="action" value="add" />
                     <input type="hidden" name="documentationUrls" id="add-doc-urls" value="[]" />
                     <div class="input-group">
                       <label>Task Description</label>
-                      <input type="text" name="description" placeholder="What did you do?" required />
+                      <input type="text" name="description" id="manual-add-description" placeholder="What did you do?" required />
                     </div>
                     <div class="input-group">
                       <label>Date</label>
-                      <input type="date" name="date" value={new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' })} required />
+                      <input type="date" name="date" id="manual-add-date" value={new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' })} required />
                     </div>
                     <div class="input-row time-12hr-row">
                       <div class="input-group">
@@ -839,6 +909,20 @@ const formatTo24hr = (timeStr: string) => {
 
 <script is:inline>
   const params = new URLSearchParams(window.location.search);
+
+  // Attendance Chart entries with no time log: clicking "Log time" jumps to the Manual
+  // Adjustment form pre-filled with that date so the user can log the actual hours worked.
+  document.querySelectorAll('.log-time-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const dateInput = document.getElementById('manual-add-date');
+      const descInput = document.getElementById('manual-add-description');
+      const box = document.getElementById('manual-add-box');
+      if (dateInput) dateInput.value = btn.dataset.date;
+      if (descInput && !descInput.value) descInput.value = `${btn.dataset.status} — please confirm actual hours worked`;
+      box?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      descInput?.focus();
+    });
+  });
 
   window.setSourceFilter = (source) => {
     const p = new URLSearchParams(window.location.search);
@@ -2537,6 +2621,54 @@ const formatTo24hr = (timeStr: string) => {
   }
   .notice-link:hover {
     color: #fff;
+  }
+
+  .attendance-marker-item.actionable {
+    background: rgba(251, 191, 36, 0.05);
+    border: 1px dashed rgba(251, 191, 36, 0.3);
+    border-radius: 10px;
+  }
+  .attendance-marker-item.informational {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px dashed var(--border-subtle);
+    border-radius: 10px;
+    opacity: 0.85;
+  }
+  .source-badge.attendance {
+    font-size: 9px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+    padding: 2px 8px;
+    border-radius: 5px;
+    color: var(--text-secondary);
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+  }
+  .source-badge.attendance.status-absent { border-color: rgba(225, 29, 72, 0.4); color: var(--att-absent); }
+  .source-badge.attendance.status-wfh { border-color: rgba(250, 204, 21, 0.4); color: var(--att-wfh); }
+  .source-badge.attendance.status-sl { border-color: rgba(245, 158, 11, 0.4); color: var(--att-sl); }
+  .source-badge.attendance.status-vl { border-color: rgba(139, 92, 246, 0.4); color: var(--att-vl); }
+  .source-badge.attendance.status-present { border-color: rgba(34, 197, 94, 0.4); color: var(--att-present); }
+  .attendance-hint {
+    font-style: italic;
+    opacity: 0.75;
+  }
+  .log-time-btn {
+    background: rgba(251, 191, 36, 0.12);
+    border: 1px solid rgba(251, 191, 36, 0.35);
+    color: #fbbf24;
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all .15s;
+    white-space: nowrap;
+  }
+  .log-time-btn:hover {
+    background: #fbbf24;
+    color: #050b16;
   }
 
   /* File Upload Zone */

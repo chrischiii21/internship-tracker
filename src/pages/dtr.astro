@@ -9,6 +9,7 @@ import { getAppSettings } from "../lib/settings";
 import { getManualEntries } from "../lib/entries";
 import { supabase } from "../lib/supabase";
 import { getStudentProgress } from "../lib/clockify";
+import { getOverridesForMonth } from "../lib/attendance";
 
 const cookieHeader = Astro.request.headers.get("cookie") || "";
 const cookies = parse(cookieHeader);
@@ -103,6 +104,18 @@ dtrData = result.days.reduce((acc, d) => {
   return acc;
 }, {} as any);
 totalMonthSeconds = result.totalMonthlyHours * 3600;
+
+// Days marked in the Attendance Chart that have no actual logged time yet. Present/WFH are flagged
+// as needing manual input (you claimed you worked, but there's nothing logged); Absent/SL/VL are
+// expected to have no log by definition, so they just get a quiet informational badge.
+const overrides = await getOverridesForMonth(viewUserId, settings.isEmployee ?? false, month, year);
+const overridesByDay: Record<number, { status: string; isHalfDay: boolean }> = {};
+for (const o of overrides) {
+  const d = parseInt(o.date.split('-')[2], 10);
+  overridesByDay[d] = { status: o.status, isHalfDay: o.isHalfDay };
+}
+const statusLabels: Record<string, string> = { absent: 'ABSENT', wfh: 'WFH', sl: 'SL', vl: 'VL', present: 'PRESENT' };
+const ACTIONABLE_STATUSES = new Set(['present', 'wfh']);
 
 // Calculate overall progress for the percentage display
 const overallRenderedHours = settings.isEmployee ? 0 : await getStudentProgress(viewUserId, settings.userEmail || "", settings.startDate);
@@ -311,9 +324,26 @@ const isEditable = user.id === viewUserId || mySettings.role === "coordinator";
             </thead>
             <tbody>
               {
-                Object.entries(dtrData).map(([day, data]: [string, any]) => (
-                  <tr class={data.totalSeconds === 0 ? "weekend-row" : ""} data-day={day}>
-                    <td class="date-col">{day}</td>
+                Object.entries(dtrData).map(([day, data]: [string, any]) => {
+                  const override = overridesByDay[parseInt(day, 10)];
+                  const hasOverride = data.totalSeconds === 0 && !!override;
+                  const needsInput = hasOverride && ACTIONABLE_STATUSES.has(override.status);
+                  const isInformational = hasOverride && !needsInput;
+                  const rowClass = needsInput
+                    ? `needs-time-input status-${override.status}`
+                    : isInformational
+                    ? `attendance-note status-${override.status}`
+                    : (data.totalSeconds === 0 ? "weekend-row" : "");
+                  return (
+                  <tr class={rowClass} data-day={day} data-override-status={override ? override.status : ""}>
+                    <td class="date-col">
+                      {day}
+                      {hasOverride && (
+                        <span class={`dtr-status-badge status-${override.status}`} title={`Marked ${statusLabels[override.status] || override.status} in Attendance Chart`}>
+                          {statusLabels[override.status] || override.status}
+                        </span>
+                      )}
+                    </td>
                     <td class={isEditable ? "editable-cell" : ""}>
                       {isEditable ? (
                         <input
@@ -373,10 +403,15 @@ const isEditable = user.id === viewUserId || mySettings.role === "coordinator";
                     <td class="total-col row-total">
                       {data.totalSeconds > 0
                         ? formatDuration(data.totalSeconds)
+                        : needsInput
+                        ? <span class="no-log-hint">No log — input needed</span>
+                        : isInformational
+                        ? <span class="attendance-note-hint">No log expected</span>
                         : ""}
                     </td>
                   </tr>
-                ))
+                  );
+                })
               }
             </tbody>
           </table>
@@ -608,12 +643,37 @@ const isEditable = user.id === viewUserId || mySettings.role === "coordinator";
         }
 
         const rowTotalCell = row?.querySelector('.row-total');
+        const dateCell = row?.querySelector('.date-col');
+        const overrideStatus = row?.dataset.overrideStatus || '';
+        const statusLabelMap = { absent: 'ABSENT', wfh: 'WFH', sl: 'SL', vl: 'VL', present: 'PRESENT' };
+        const actionableStatuses = new Set(['present', 'wfh']);
+        const allStatusClasses = ['status-absent', 'status-wfh', 'status-sl', 'status-vl', 'status-present'];
+
         if (rowTotalCell) {
           if (resData.dayTotalSeconds > 0) {
             const h = Math.floor(resData.dayTotalSeconds / 3600);
             const m = Math.floor((resData.dayTotalSeconds % 3600) / 60);
             rowTotalCell.textContent = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-            row?.classList.remove('weekend-row');
+            row?.classList.remove('weekend-row', 'needs-time-input', 'attendance-note', ...allStatusClasses);
+            dateCell?.querySelector('.dtr-status-badge')?.remove();
+          } else if (overrideStatus) {
+            // Time was cleared but the day is still flagged in the Attendance Chart — restore the highlight.
+            const isActionable = actionableStatuses.has(overrideStatus);
+            rowTotalCell.innerHTML = '';
+            const hint = document.createElement('span');
+            hint.className = isActionable ? 'no-log-hint' : 'attendance-note-hint';
+            hint.textContent = isActionable ? 'No log — input needed' : 'No log expected';
+            rowTotalCell.appendChild(hint);
+
+            row?.classList.remove('weekend-row', 'needs-time-input', 'attendance-note', ...allStatusClasses);
+            row?.classList.add(isActionable ? 'needs-time-input' : 'attendance-note', `status-${overrideStatus}`);
+            if (dateCell && !dateCell.querySelector('.dtr-status-badge')) {
+              const badge = document.createElement('span');
+              badge.className = `dtr-status-badge status-${overrideStatus}`;
+              badge.title = `Marked ${statusLabelMap[overrideStatus] || overrideStatus} in Attendance Chart`;
+              badge.textContent = statusLabelMap[overrideStatus] || overrideStatus;
+              dateCell.appendChild(badge);
+            }
           } else {
             rowTotalCell.textContent = '';
             row?.classList.add('weekend-row');
@@ -956,6 +1016,53 @@ const isEditable = user.id === viewUserId || mySettings.role === "coordinator";
   }
   .weekend-row {
     background: #fef2f2;
+  }
+
+  /* Present/WFH marked in the Attendance Chart with no actual time logged — actionable, needs input */
+  .needs-time-input {
+    background: #fffbeb;
+    box-shadow: inset 3px 0 0 #f59e0b;
+  }
+  .needs-time-input.status-wfh { box-shadow: inset 3px 0 0 #ca8a04; }
+  .needs-time-input.status-present { box-shadow: inset 3px 0 0 #16a34a; }
+
+  /* Absent/SL/VL marked in the Attendance Chart — informational only, no log expected */
+  .attendance-note {
+    background: #f8fafc;
+  }
+  .attendance-note.status-absent { box-shadow: inset 3px 0 0 #be123c; }
+  .attendance-note.status-sl { box-shadow: inset 3px 0 0 #b45309; }
+  .attendance-note.status-vl { box-shadow: inset 3px 0 0 #7c3aed; }
+
+  .dtr-status-badge {
+    display: block;
+    margin-top: 2px;
+    font-size: 8px;
+    font-weight: 800;
+    letter-spacing: .03em;
+    padding: 1px 4px;
+    border-radius: 4px;
+    color: #fff;
+  }
+  .dtr-status-badge.status-absent { background: #be123c; }
+  .dtr-status-badge.status-wfh { background: #ca8a04; }
+  .dtr-status-badge.status-sl { background: #b45309; }
+  .dtr-status-badge.status-vl { background: #7c3aed; }
+  .dtr-status-badge.status-present { background: #16a34a; }
+  .no-log-hint {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 700;
+    font-style: italic;
+    color: #b45309;
+  }
+  .attendance-note-hint {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 600;
+    font-style: italic;
+    color: #64748b;
+    opacity: 0.9;
   }
 
   .dtr-footer {

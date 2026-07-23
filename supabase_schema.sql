@@ -98,3 +98,55 @@ CREATE POLICY "Users can manage own student settings" ON public.student_settings
 CREATE POLICY "Users can manage own entries" ON public.entries FOR ALL USING (true); -- Simplified
 CREATE POLICY "Users can manage own timers" ON public.active_timers FOR ALL USING (true); -- Simplified
 CREATE POLICY "Session management" ON public.sessions FOR ALL USING (true); -- Simplified
+
+-- ==========================================
+-- ATTENDANCE FEATURE
+-- ==========================================
+
+-- 9. ATTENDANCE OVERRIDES
+-- Purpose: Manual per-day status marks (present/absent/wfh/sl/vl), partitioned by mode like `entries`.
+-- NOTE: if this table was already created before SL/VL replaced the single generic 'leave' status,
+-- run this migration first (defaults any existing 'leave' rows to 'vl'):
+--   UPDATE public.attendance_overrides SET status = 'vl' WHERE status = 'leave';
+--   ALTER TABLE public.attendance_overrides DROP CONSTRAINT attendance_overrides_status_check;
+--   ALTER TABLE public.attendance_overrides ADD CONSTRAINT attendance_overrides_status_check CHECK (status IN ('present', 'absent', 'wfh', 'sl', 'vl'));
+CREATE TABLE IF NOT EXISTS public.attendance_overrides (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id TEXT NOT NULL,
+    is_employee BOOLEAN NOT NULL DEFAULT FALSE,
+    date DATE NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('present', 'absent', 'wfh', 'sl', 'vl')),
+    is_half_day BOOLEAN NOT NULL DEFAULT FALSE,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE (user_id, is_employee, date)
+);
+
+-- 10. ATTENDANCE CONFIG
+-- Purpose: Non-working weekdays + full-day-hours threshold. Shared across modes (user_id only).
+CREATE TABLE IF NOT EXISTS public.attendance_config (
+    user_id TEXT PRIMARY KEY,
+    non_working_weekdays INTEGER[] NOT NULL DEFAULT '{0,6}', -- 0=Sun..6=Sat
+    full_day_hours NUMERIC NOT NULL DEFAULT 8 CHECK (full_day_hours > 0),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 11. ATTENDANCE HOLIDAYS
+-- Purpose: Specific dates forced to non-working. Shared across modes (user_id only).
+CREATE TABLE IF NOT EXISTS public.attendance_holidays (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id TEXT NOT NULL,
+    date DATE NOT NULL,
+    label TEXT NOT NULL DEFAULT 'Holiday',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE (user_id, date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_attendance_overrides_user ON public.attendance_overrides(user_id, is_employee);
+CREATE INDEX IF NOT EXISTS idx_attendance_holidays_user ON public.attendance_holidays(user_id);
+
+ALTER TABLE public.attendance_overrides ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.attendance_config ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.attendance_holidays ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can manage own attendance overrides" ON public.attendance_overrides FOR ALL USING (true); -- Simplified
+CREATE POLICY "Users can manage own attendance config" ON public.attendance_config FOR ALL USING (true); -- Simplified
+CREATE POLICY "Users can manage own attendance holidays" ON public.attendance_holidays FOR ALL USING (true); -- Simplified

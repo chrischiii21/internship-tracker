@@ -1,0 +1,863 @@
+---
+import Layout from "../layouts/Layout.astro";
+import Header from "../components/Header.astro";
+import Sidebar from "../components/Sidebar.astro";
+import { getSession } from "../lib/auth";
+import { parse } from "cookie";
+import { getClockifyUser, getDailyDTR } from "../lib/clockify";
+import { getAppSettings } from "../lib/settings";
+import { getManualEntries } from "../lib/entries";
+import { supabase } from "../lib/supabase";
+import { getMonthlyAttendance } from "../lib/attendance";
+
+const cookieHeader = Astro.request.headers.get("cookie") || "";
+const cookies = parse(cookieHeader);
+const user = cookies.session ? await getSession(cookies.session) : null;
+
+if (!user) return Astro.redirect("/");
+
+const mySettings = await getAppSettings(user.id);
+const targetStudentId = Astro.url.searchParams.get("studentId");
+let viewUserId = user.id;
+
+// Coordinator Logic (view-only) — same resolution pattern as dtr.astro
+let students = [];
+let sections = [];
+let filteredStudents = [];
+const selectedSection = Astro.url.searchParams.get("section") || "all";
+
+if (mySettings.role === "coordinator") {
+  const { data: mySections } = await supabase
+    .from("coordinator_sections")
+    .select("*")
+    .eq("coordinator_id", user.id)
+    .order("section_name", { ascending: true });
+  sections = mySections || [];
+
+  const { data: myStudents } = await supabase
+    .from("student_settings")
+    .select("user_id, user_name, section_id")
+    .eq("coordinator_id", user.id);
+  students = myStudents || [];
+
+  filteredStudents = students;
+  if (selectedSection !== "all") {
+    filteredStudents = students.filter(s => s.section_id === selectedSection);
+  }
+
+  if (targetStudentId && students.some((s) => s.user_id === targetStudentId)) {
+    const isStudentInFiltered = selectedSection === 'all' ||
+      (students.find(s => s.user_id === targetStudentId)?.section_id === selectedSection);
+
+    if (isStudentInFiltered) {
+      viewUserId = targetStudentId;
+    } else if (filteredStudents.length > 0) {
+      viewUserId = filteredStudents[0].user_id;
+    }
+  } else if (filteredStudents.length > 0) {
+    viewUserId = filteredStudents[0].user_id;
+  }
+}
+
+const isReadOnly = mySettings.role === "coordinator";
+const settings = await getAppSettings(viewUserId);
+
+// Coordinators can inspect either partition for a student; self-view always shows the viewer's own current mode.
+const modeParam = Astro.url.searchParams.get("mode");
+const viewIsEmployee = isReadOnly && modeParam
+  ? modeParam === "employee"
+  : (settings.isEmployee ?? false);
+
+const isEditable = !isReadOnly;
+
+const now = new Date();
+const currentMonth = now.getMonth() + 1;
+const currentYear = now.getFullYear();
+
+const month = parseInt(Astro.url.searchParams.get("month") || currentMonth.toString());
+const year = parseInt(Astro.url.searchParams.get("year") || currentYear.toString());
+
+const isClockifySet = !!(
+  import.meta.env.CLOCKIFY_API_KEY && import.meta.env.CLOCKIFY_WORKSPACE_ID
+);
+
+const manual = await getManualEntries(viewUserId, viewIsEmployee);
+const manualFiltered = manual.filter((e) => {
+  const d = new Date(e.startFull || `${e.date}T${e.startTime}+08:00`);
+  return d.getMonth() + 1 === month && d.getFullYear() === year;
+});
+
+let clockifyId = "";
+if (isClockifySet && settings.clockifyEnabled !== false) {
+  try {
+    const clockifyUser = await getClockifyUser(settings.userEmail || "");
+    if (clockifyUser) clockifyId = clockifyUser.id;
+  } catch (e) {}
+}
+
+const dtrResult = await getDailyDTR(clockifyId, month, year, manualFiltered);
+const dailyTotals: Record<number, number> = {};
+for (const d of dtrResult.days) dailyTotals[parseInt(d.day)] = d.totalSeconds;
+
+const { days, config, holidays } = await getMonthlyAttendance(viewUserId, viewIsEmployee, month, year, dailyTotals);
+
+const monthName = new Date(year, month - 1)
+  .toLocaleDateString("en-US", { month: "long", timeZone: "Asia/Manila" })
+  .toUpperCase();
+
+const leadingBlanks = new Date(year, month - 1, 1).getDay();
+const weekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+---
+
+<Layout title="Attendance Chart">
+  <Header user={user} />
+
+  <div id="portal-body">
+    <Sidebar user={user} activeTab="attendance" role={mySettings.role} />
+
+    <main id="portal-main">
+      <div class="bg-grid" aria-hidden="true"></div>
+
+      <div class="page-header">
+        <h1>Attendance</h1>
+        <p class="page-subtitle">
+          {settings.isEmployee ? "Employee" : "OJT"} attendance for {monthName} {year}
+          {isReadOnly && <span class="readonly-pill">View only</span>}
+        </p>
+      </div>
+
+      <div class="actions-bar">
+        <div class="month-selector">
+          {
+            mySettings.role === "coordinator" && (
+              <>
+                <select id="section-selector" class="att-select">
+                  <option value="all" selected={selectedSection === 'all'}>All Sections</option>
+                  {sections.map((sec) => (
+                    <option value={sec.id} selected={sec.id === selectedSection}>
+                      {sec.section_name}
+                    </option>
+                  ))}
+                </select>
+
+                <select id="student-selector" class="att-select" disabled={filteredStudents.length === 0}>
+                  {filteredStudents.length > 0 ? (
+                    filteredStudents.map((s) => (
+                      <option value={s.user_id} selected={s.user_id === viewUserId}>
+                        {s.user_name}
+                      </option>
+                    ))
+                  ) : (
+                    <option value="">No students in section</option>
+                  )}
+                </select>
+
+                <select id="mode-selector" class="att-select">
+                  <option value="ojt" selected={!viewIsEmployee}>OJT Mode</option>
+                  <option value="employee" selected={viewIsEmployee}>Employee Mode</option>
+                </select>
+              </>
+            )
+          }
+          <select id="month-selector" class="att-select">
+            {
+              Array.from({ length: 12 }).map((_, i) => (
+                <option value={i + 1} selected={month === i + 1}>
+                  {new Date(0, i).toLocaleString("en-US", { month: "long" })}
+                </option>
+              ))
+            }
+          </select>
+          <select id="year-selector" class="att-select">
+            {
+              [2024, 2025, 2026].map((y) => (
+                <option value={y} selected={year === y}>{y}</option>
+              ))
+            }
+          </select>
+        </div>
+
+        {isEditable && (
+          <button id="config-btn" class="config-btn" title="Configure calendar">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.7"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" stroke="currentColor" stroke-width="1.7"/></svg>
+            Configure Calendar
+          </button>
+        )}
+      </div>
+
+      <div class="legend">
+        <span class="legend-item"><i class="swatch present"></i>Present</span>
+        <span class="legend-item"><i class="swatch absent"></i>Absent</span>
+        <span class="legend-item"><i class="swatch wfh"></i>WFH</span>
+        <span class="legend-item"><i class="swatch sl"></i>Sick Leave</span>
+        <span class="legend-item"><i class="swatch vl"></i>Vacation Leave</span>
+        <span class="legend-item"><i class="swatch half"></i>Half-day</span>
+        <span class="legend-item"><i class="swatch undertime"></i>Undertime</span>
+        <span class="legend-item"><i class="swatch non-working"></i>Non-working</span>
+        <span class="legend-item"><i class="swatch unmarked"></i>Unmarked</span>
+      </div>
+
+      <div class="calendar-wrapper">
+        <div class="calendar-grid" id="calendar-grid">
+          {weekdayLabels.map((w) => <div class="weekday-header">{w}</div>)}
+          {Array.from({ length: leadingBlanks }).map(() => <div class="day-cell blank"></div>)}
+          {days.map((d) => (
+            <div
+              class={`day-cell status-${d.status} ${d.isHalfDay ? 'half-day' : ''} ${d.isUndertime ? 'undertime' : ''} ${isEditable ? 'editable' : ''}`}
+              data-day={d.day}
+              data-date={d.date}
+              data-status={d.status}
+              data-half={d.isHalfDay ? '1' : '0'}
+            >
+              <span class="day-num">{d.day}</span>
+              {d.isHoliday && <span class="holiday-dot" title={d.holidayLabel || 'Holiday'}></span>}
+              {d.isUndertime && <span class="undertime-badge" title="Undertime">UT</span>}
+              {d.totalSeconds > 0 && <span class="day-hours">{(d.totalSeconds / 3600).toFixed(1)}h</span>}
+            </div>
+          ))}
+        </div>
+      </div>
+    </main>
+  </div>
+
+  {isEditable && (
+    <div id="status-popover" class="status-popover hidden">
+      <div class="popover-date" id="popover-date"></div>
+      <label class="range-toggle">
+        <input type="checkbox" id="popover-range-toggle" />
+        Apply to a date range
+      </label>
+      <div id="popover-range-fields" class="popover-range-fields hidden">
+        <span class="range-label">through</span>
+        <input type="date" id="popover-end-date" />
+      </div>
+      <label class="half-day-toggle">
+        <input type="checkbox" id="popover-half-day" />
+        Half day
+      </label>
+      <div class="popover-buttons-label">Tap a status to apply it:</div>
+      <div class="popover-buttons">
+        <button class="status-btn present" data-status="present"><span class="btn-label">Present</span></button>
+        <button class="status-btn absent" data-status="absent"><span class="btn-label">Absent</span></button>
+        <button class="status-btn wfh" data-status="wfh"><span class="btn-label">WFH</span></button>
+        <button class="status-btn sl" data-status="sl" title="Sick Leave"><span class="btn-label">SL</span></button>
+        <button class="status-btn vl full-width" data-status="vl" title="Vacation Leave"><span class="btn-label">VL</span></button>
+      </div>
+      <div class="popover-footer">
+        <button id="popover-clear" class="popover-clear-btn"><span class="btn-label">Clear</span></button>
+        <button id="popover-close" class="popover-close-btn">Cancel</button>
+      </div>
+    </div>
+  )}
+
+  {isEditable && (
+    <div id="config-modal" class="modal-overlay">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>Configure Calendar</h2>
+          <button id="config-close" class="modal-close-btn" aria-label="Close">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+
+        <div class="modal-section">
+          <label class="modal-label">Non-working days</label>
+          <div class="weekday-checks">
+            {weekdayLabels.map((w, i) => (
+              <label class="weekday-check">
+                <input type="checkbox" class="nonworking-check" value={i} checked={config.nonWorkingWeekdays.includes(i)} />
+                {w}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div class="modal-section">
+          <label class="modal-label" for="full-day-hours">Standard full-day hours</label>
+          <input type="number" id="full-day-hours" min="0.5" step="0.5" value={config.fullDayHours} />
+          <p class="modal-hint">Reference value for your normal workday length. Half-day (&lt;5h) and undertime (5–6h) detection always uses these fixed thresholds regardless of this setting.</p>
+        </div>
+
+        <div class="modal-section">
+          <label class="modal-label">Holidays</label>
+          <div id="holiday-list" class="holiday-list">
+            {holidays.map((h) => (
+              <div class="holiday-row" data-id={h.id}>
+                <span class="holiday-date">{h.date}</span>
+                <span class="holiday-label">{h.label}</span>
+                <button class="holiday-remove-btn" data-id={h.id}><span class="btn-label">&times;</span></button>
+              </div>
+            ))}
+          </div>
+          <div class="holiday-add-row">
+            <input type="date" id="holiday-date-input" />
+            <input type="text" id="holiday-label-input" placeholder="Label (e.g. Independence Day)" />
+            <button id="holiday-add-btn" class="holiday-add-btn"><span class="btn-label">Add</span></button>
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button id="config-save-btn" class="save-btn"><span class="btn-label">Save Configuration</span></button>
+        </div>
+      </div>
+    </div>
+  )}
+</Layout>
+
+<script define:vars={{ isEditable }}>
+  const secSel = document.getElementById("section-selector");
+  const sSel = document.getElementById("student-selector");
+  const modeSel = document.getElementById("mode-selector");
+  const mSel = document.getElementById("month-selector");
+  const ySel = document.getElementById("year-selector");
+
+  const update = (e) => {
+    let url = `/attendance?month=${mSel.value}&year=${ySel.value}`;
+    if (secSel?.value) url += `&section=${secSel.value}`;
+    if (e?.target !== secSel && sSel?.value) url += `&studentId=${sSel.value}`;
+    if (modeSel?.value) url += `&mode=${modeSel.value}`;
+    window.location.href = url;
+  };
+
+  secSel?.addEventListener("change", update);
+  sSel?.addEventListener("change", update);
+  modeSel?.addEventListener("change", update);
+  mSel?.addEventListener("change", update);
+  ySel?.addEventListener("change", update);
+
+  if (!isEditable) {
+    // Nothing else to wire up for read-only (coordinator) view.
+  } else {
+    const popover = document.getElementById("status-popover");
+    const popoverDate = document.getElementById("popover-date");
+    const halfDayCheckbox = document.getElementById("popover-half-day");
+    const rangeToggle = document.getElementById("popover-range-toggle");
+    const rangeFields = document.getElementById("popover-range-fields");
+    const endDateInput = document.getElementById("popover-end-date");
+    let activeCell = null;
+    // Bumped every time a save starts; a completing request only releases the popover's shared
+    // busy state if it's still the most recent one — otherwise a slow, stale request finishing
+    // late could re-enable the popover mid-way through a newer request (or clobber it entirely).
+    let saveRequestToken = 0;
+
+    rangeToggle?.addEventListener("change", () => {
+      rangeFields.classList.toggle("hidden", !rangeToggle.checked);
+    });
+
+    const statusLabel = (s) => ({ present: 'Present', absent: 'Absent', wfh: 'WFH', sl: 'Sick Leave', vl: 'Vacation Leave', 'non-working': 'Non-working', unmarked: 'Unmarked' }[s] || s);
+
+    // Shared loading-state helpers so every toggle/save action gives visible feedback instead of
+    // silently "freezing" while its request is in flight. Buttons keep their original size/label
+    // (just visually hidden behind a centered spinner) so nothing resizes or reflows mid-request.
+    const setButtonLoading = (btn, loading) => {
+      if (!btn) return;
+      btn.disabled = loading;
+      btn.classList.toggle('is-loading', loading);
+    };
+
+    const setPopoverBusy = (busy) => {
+      popover.classList.toggle('popover-busy', busy);
+      popover.querySelectorAll('button, input').forEach((el) => { el.disabled = busy; });
+    };
+
+    const showCellSaving = (cell) => {
+      if (cell.querySelector(':scope > .cell-spinner-overlay')) return;
+      const overlay = document.createElement('div');
+      overlay.className = 'cell-spinner-overlay';
+      cell.appendChild(overlay);
+    };
+    const hideCellSaving = (cell) => {
+      cell.querySelector(':scope > .cell-spinner-overlay')?.remove();
+    };
+
+    const clearPopoverLoading = () => {
+      setPopoverBusy(false);
+      popover.querySelectorAll('.is-loading').forEach((btn) => setButtonLoading(btn, false));
+    };
+
+    const closePopover = () => {
+      popover?.classList.add("hidden");
+      activeCell = null;
+      clearPopoverLoading();
+    };
+
+    const openPopover = (cell) => {
+      activeCell = cell;
+      clearPopoverLoading();
+      const rect = cell.getBoundingClientRect();
+      popover.classList.remove("hidden");
+      popover.style.top = `${rect.bottom + 6}px`;
+      popover.style.left = `${rect.left}px`;
+
+      requestAnimationFrame(() => {
+        const pRect = popover.getBoundingClientRect();
+        if (pRect.right > window.innerWidth - 8) {
+          popover.style.left = `${Math.max(8, window.innerWidth - pRect.width - 8)}px`;
+        }
+        if (pRect.bottom > window.innerHeight - 8) {
+          popover.style.top = `${rect.top - pRect.height - 6}px`;
+        }
+      });
+
+      popoverDate.textContent = `${cell.dataset.date} — currently ${statusLabel(cell.dataset.status)}`;
+      halfDayCheckbox.checked = cell.dataset.half === '1';
+
+      rangeToggle.checked = false;
+      rangeFields.classList.add("hidden");
+      endDateInput.min = cell.dataset.date;
+      endDateInput.value = '';
+    };
+
+    document.getElementById("calendar-grid")?.addEventListener("click", (e) => {
+      const cell = e.target.closest(".day-cell.editable");
+      if (!cell) return;
+      if (activeCell === cell && !popover.classList.contains("hidden")) {
+        closePopover();
+      } else {
+        openPopover(cell);
+      }
+    });
+
+    document.getElementById("popover-close")?.addEventListener("click", closePopover);
+    document.addEventListener("click", (e) => {
+      if (!activeCell) return;
+      if (popover.contains(e.target) || e.target.closest(".day-cell")) return;
+      closePopover();
+    });
+
+    const applyResultToCell = (cell, day) => {
+      cell.className = `day-cell status-${day.status} ${day.isHalfDay ? 'half-day' : ''} ${day.isUndertime ? 'undertime' : ''} editable`;
+      cell.dataset.status = day.status;
+      cell.dataset.half = day.isHalfDay ? '1' : '0';
+
+      cell.querySelectorAll('.day-hours, .holiday-dot, .undertime-badge').forEach(el => el.remove());
+      const dayNum = cell.querySelector('.day-num');
+      if (day.isHoliday) {
+        const dot = document.createElement('span');
+        dot.className = 'holiday-dot';
+        dot.title = day.holidayLabel || 'Holiday';
+        dayNum.after(dot);
+      }
+      if (day.isUndertime) {
+        const badge = document.createElement('span');
+        badge.className = 'undertime-badge';
+        badge.title = 'Undertime';
+        badge.textContent = 'UT';
+        cell.appendChild(badge);
+      }
+      if (day.totalSeconds > 0) {
+        const hours = document.createElement('span');
+        hours.className = 'day-hours';
+        hours.textContent = `${(day.totalSeconds / 3600).toFixed(1)}h`;
+        cell.appendChild(hours);
+      }
+    };
+
+    const saveStatus = async (status, triggerBtn) => {
+      if (!activeCell) return;
+      // Snapshot the cell + popover-close now: activeCell/closePopover can change while this
+      // request is in flight (user clicks another day, closes the popover, etc.), and we must
+      // keep updating the day this save was actually for, not whatever is "active" once it resolves.
+      const cell = activeCell;
+      const date = cell.dataset.date;
+      const isHalfDay = halfDayCheckbox.checked;
+      const isRange = rangeToggle.checked;
+
+      if (isRange && (!endDateInput.value || endDateInput.value < date)) {
+        window.showToast?.('Pick a valid end date for the range', 'error');
+        return;
+      }
+
+      // This request "owns" the popover's busy state only until a newer one starts (e.g. the
+      // user switches to another day mid-request). Only the current owner is allowed to release it.
+      const myToken = ++saveRequestToken;
+      const stillOwnsPopover = () => saveRequestToken === myToken;
+
+      setPopoverBusy(true);
+      setButtonLoading(triggerBtn, true);
+      showCellSaving(cell);
+
+      try {
+        const res = await fetch('/api/attendance/save-status', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ date, endDate: isRange ? endDateInput.value : undefined, status, isHalfDay }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to save');
+
+        if (data.bulk) {
+          const skippedNote = data.skipped ? ` (${data.skipped} non-working day(s) skipped)` : '';
+          window.showToast?.(`Marked ${statusLabel(status)} for ${data.count} day(s)${skippedNote}`, 'success');
+          window.location.reload();
+          return;
+        }
+
+        if (cell.isConnected) applyResultToCell(cell, data.day);
+        window.showToast?.(`${date} marked ${statusLabel(data.day.status)}`, 'success');
+        if (activeCell === cell && stillOwnsPopover()) closePopover();
+      } catch (err) {
+        window.showToast?.(err.message || 'Error saving attendance', 'error');
+      } finally {
+        if (cell.isConnected) hideCellSaving(cell);
+        // Always release this specific button — it can't have a newer overlapping request of its
+        // own since it stays disabled for the whole time this one is in flight.
+        setButtonLoading(triggerBtn, false);
+        if (stillOwnsPopover()) setPopoverBusy(false);
+      }
+    };
+
+    document.querySelectorAll('.status-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => saveStatus(btn.dataset.status, e.currentTarget));
+    });
+    document.getElementById('popover-clear')?.addEventListener('click', (e) => saveStatus('clear', e.currentTarget));
+
+    // Config modal
+    const configModal = document.getElementById('config-modal');
+    document.getElementById('config-btn')?.addEventListener('click', () => configModal?.classList.add('active'));
+    document.getElementById('config-close')?.addEventListener('click', () => configModal?.classList.remove('active'));
+
+    document.getElementById('config-save-btn')?.addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      const nonWorkingWeekdays = Array.from(document.querySelectorAll('.nonworking-check:checked')).map(el => parseInt(el.value));
+      const fullDayHours = parseFloat(document.getElementById('full-day-hours').value);
+
+      setButtonLoading(btn, true);
+      try {
+        const res = await fetch('/api/attendance/save-config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nonWorkingWeekdays, fullDayHours }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to save config');
+        window.location.reload();
+      } catch (err) {
+        window.showToast?.(err.message || 'Error saving configuration', 'error');
+        setButtonLoading(btn, false);
+      }
+    });
+
+    document.getElementById('holiday-add-btn')?.addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      const dateInput = document.getElementById('holiday-date-input');
+      const labelInput = document.getElementById('holiday-label-input');
+      if (!dateInput.value) {
+        window.showToast?.('Pick a date first', 'error');
+        return;
+      }
+
+      setButtonLoading(btn, true);
+      try {
+        const res = await fetch('/api/attendance/holidays', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ date: dateInput.value, label: labelInput.value || 'Holiday' }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to add holiday');
+
+        const list = document.getElementById('holiday-list');
+        const row = document.createElement('div');
+        row.className = 'holiday-row';
+        row.dataset.id = data.holiday.id;
+        row.innerHTML = `<span class="holiday-date">${data.holiday.date}</span><span class="holiday-label">${data.holiday.label}</span><button class="holiday-remove-btn" data-id="${data.holiday.id}"><span class="btn-label">&times;</span></button>`;
+        list.appendChild(row);
+        dateInput.value = '';
+        labelInput.value = '';
+        window.showToast?.('Holiday added', 'success');
+      } catch (err) {
+        window.showToast?.(err.message || 'Error adding holiday', 'error');
+      } finally {
+        setButtonLoading(btn, false);
+      }
+    });
+
+    document.getElementById('holiday-list')?.addEventListener('click', async (e) => {
+      const btn = e.target.closest('.holiday-remove-btn');
+      if (!btn) return;
+      const id = btn.dataset.id;
+
+      setButtonLoading(btn, true);
+      try {
+        const res = await fetch('/api/attendance/holidays', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to remove holiday');
+        btn.closest('.holiday-row')?.remove();
+        window.showToast?.('Holiday removed', 'success');
+      } catch (err) {
+        window.showToast?.(err.message || 'Error removing holiday', 'error');
+        setButtonLoading(btn, false);
+      }
+    });
+  }
+</script>
+
+<style>
+  #portal-body {
+    display: flex;
+    min-height: 100vh;
+    padding-top: 56px;
+  }
+  #portal-main {
+    margin-left: 220px;
+    flex: 1;
+    padding: 40px;
+    position: relative;
+  }
+
+  .bg-grid {
+    position: fixed;
+    inset: 0;
+    background-image: linear-gradient(rgba(237, 102, 33, 0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(237, 102, 33, 0.04) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+  }
+
+  .page-header { max-width: 900px; margin: 0 auto 20px; }
+  .page-header h1 { font-size: 26px; font-weight: 700; color: var(--text-primary); }
+  .page-subtitle { font-size: 13px; color: var(--text-secondary); margin-top: 4px; display: flex; align-items: center; gap: 10px; }
+  .readonly-pill {
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+    background: rgba(96, 165, 250, 0.12); color: #60a5fa; border: 1px solid rgba(96, 165, 250, 0.3);
+    padding: 3px 8px; border-radius: 6px;
+  }
+
+  .actions-bar {
+    display: flex; justify-content: space-between; align-items: center; gap: 12px;
+    margin: 0 auto 20px; max-width: 900px; flex-wrap: wrap;
+    background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-subtle);
+    padding: 12px 16px; border-radius: 14px;
+  }
+  .month-selector { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex: 1; min-width: 0; }
+  .att-select {
+    background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.1);
+    color: var(--text-primary); padding: 8px 10px; border-radius: 8px; outline: none;
+    font-size: 13px; font-weight: 500; cursor: pointer;
+  }
+  .att-select option { background: #111827; color: white; }
+  .config-btn {
+    display: flex; align-items: center; gap: 8px;
+    background: rgba(237, 102, 33, 0.1); border: 1px solid rgba(237, 102, 33, 0.3);
+    color: var(--ntv-orange); padding: 10px 16px; border-radius: 8px; font-size: 13px; font-weight: 700; cursor: pointer;
+  }
+  .config-btn:hover { background: rgba(237, 102, 33, 0.18); }
+
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; max-width: 900px; margin: 0 auto 16px; font-size: 12px; color: var(--text-secondary); }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+  .swatch.present { background: var(--att-present); }
+  .swatch.absent { background: var(--att-absent); }
+  .swatch.wfh { background: var(--att-wfh); }
+  .swatch.sl { background: var(--att-sl); }
+  .swatch.vl { background: var(--att-vl); }
+  .swatch.half { background: linear-gradient(135deg, var(--att-present) 50%, var(--att-cell-empty) 50%); }
+  .swatch.undertime { background: var(--att-present); border: 2px dashed rgba(5, 11, 22, 0.45); }
+  .swatch.non-working { background: var(--att-nonworking-bg); border: 1px solid var(--border-subtle); }
+  .swatch.unmarked { background: var(--att-cell-empty); border: 1px dashed var(--border-subtle); }
+
+  .calendar-wrapper { max-width: 900px; margin: 0 auto; }
+  .calendar-grid {
+    display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px;
+    background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-subtle);
+    border-radius: 14px; padding: 16px;
+  }
+  .weekday-header { text-align: center; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-secondary); padding-bottom: 6px; }
+
+  .day-cell {
+    position: relative; min-height: 64px; border-radius: 8px; padding: 6px 8px;
+    display: flex; flex-direction: column; justify-content: space-between;
+    font-size: 11px; color: var(--text-primary);
+  }
+  .day-cell.blank { background: transparent; }
+  .day-num { font-size: 13px; font-weight: 700; }
+  .day-hours { font-size: 10px; opacity: 0.85; align-self: flex-end; }
+  .holiday-dot { position: absolute; top: 6px; right: 8px; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .undertime-badge {
+    position: absolute; bottom: 6px; left: 8px; font-size: 8px; font-weight: 800;
+    letter-spacing: .02em; padding: 1px 4px; border-radius: 4px;
+    background: rgba(5, 11, 22, 0.35); color: inherit;
+  }
+
+  .day-cell.editable { cursor: pointer; transition: transform 0.15s; }
+  .day-cell.editable:hover { transform: translateY(-1px); box-shadow: 0 4px 10px rgba(0,0,0,0.25); }
+
+  /* A separate overlay element (not a class on the cell itself) so it survives the cell's
+     className being fully replaced mid-request when the new status is applied. */
+  .cell-spinner-overlay {
+    position: absolute; inset: 0; z-index: 2; border-radius: inherit;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(5, 11, 22, 0.45);
+  }
+  .cell-spinner-overlay::after {
+    content: ''; width: 14px; height: 14px;
+    border: 2px solid rgba(255, 255, 255, 0.3); border-top-color: #fff;
+    border-radius: 50%; animation: btn-spin 0.6s linear infinite;
+  }
+
+  .day-cell.status-present, .day-cell.status-absent, .day-cell.status-wfh, .day-cell.status-sl, .day-cell.status-vl {
+    color: #050b16;
+  }
+  .day-cell.status-present { background: var(--att-present); }
+  .day-cell.status-absent { background: var(--att-absent); }
+  .day-cell.status-wfh { background: var(--att-wfh); }
+  .day-cell.status-sl { background: var(--att-sl); }
+  .day-cell.status-vl { background: var(--att-vl); color: #fff; }
+
+  .day-cell.status-present.half-day { background: linear-gradient(135deg, var(--att-present) 50%, var(--att-cell-empty) 50%); color: var(--text-primary); }
+  .day-cell.status-absent.half-day { background: linear-gradient(135deg, var(--att-absent) 50%, var(--att-cell-empty) 50%); color: var(--text-primary); }
+  .day-cell.status-wfh.half-day { background: linear-gradient(135deg, var(--att-wfh) 50%, var(--att-cell-empty) 50%); color: var(--text-primary); }
+  .day-cell.status-sl.half-day { background: linear-gradient(135deg, var(--att-sl) 50%, var(--att-cell-empty) 50%); color: var(--text-primary); }
+  .day-cell.status-vl.half-day { background: linear-gradient(135deg, var(--att-vl) 50%, var(--att-cell-empty) 50%); color: var(--text-primary); }
+
+  .day-cell.status-non-working { background: var(--att-nonworking-bg); color: var(--att-nonworking-text); }
+  .day-cell.status-unmarked { background: var(--att-cell-empty); border: 1px dashed var(--border-subtle); }
+
+  /* Status popover */
+  .status-popover {
+    position: fixed; z-index: 3000; background: var(--modal-bg); border: 1px solid var(--border-subtle);
+    border-radius: 12px; padding: 14px; width: min(260px, calc(100vw - 24px)); box-shadow: 0 12px 32px rgba(0,0,0,0.4);
+    max-height: calc(100vh - 24px); overflow-y: auto;
+  }
+  .status-popover.hidden { display: none; }
+  .status-popover.popover-busy { opacity: 0.92; transition: opacity .15s ease; }
+
+  @keyframes btn-spin { to { transform: rotate(360deg); } }
+
+  /* Loading buttons: hide the label in place (layout space is preserved, so nothing resizes)
+     and show a centered spinner using the button's own text color for contrast. */
+  button.is-loading { position: relative; cursor: wait; pointer-events: none; }
+  button.is-loading .btn-label { visibility: hidden; }
+  button.is-loading::after {
+    content: '';
+    position: absolute; top: 50%; left: 50%;
+    width: 14px; height: 14px; margin: -7px 0 0 -7px;
+    border: 2px solid rgba(128, 128, 128, 0.35); border-top-color: currentColor;
+    border-radius: 50%; animation: btn-spin 0.6s linear infinite;
+  }
+  .status-popover button:disabled:not(.is-loading),
+  .modal-content button:disabled:not(.is-loading),
+  .holiday-row button:disabled:not(.is-loading) {
+    opacity: 0.6; cursor: not-allowed;
+  }
+  .popover-date { font-size: 11px; color: var(--text-secondary); margin-bottom: 10px; }
+  .popover-buttons-label { font-size: 11px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; }
+  .popover-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 10px; }
+  .status-btn { padding: 8px; border-radius: 6px; border: none; font-size: 12px; font-weight: 700; cursor: pointer; color: #050b16; }
+  .status-btn.present { background: var(--att-present); }
+  .status-btn.absent { background: var(--att-absent); }
+  .status-btn.wfh { background: var(--att-wfh); }
+  .status-btn.sl { background: var(--att-sl); }
+  .status-btn.vl { background: var(--att-vl); color: #fff; }
+  .status-btn.full-width { grid-column: 1 / -1; }
+  .half-day-toggle { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-primary); margin-bottom: 8px; cursor: pointer; }
+  .range-toggle { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-primary); margin-bottom: 8px; cursor: pointer; }
+  .popover-range-fields { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .popover-range-fields.hidden { display: none; }
+  .popover-range-fields .range-label { font-size: 11px; color: var(--text-secondary); }
+  .popover-range-fields input[type="date"] {
+    flex: 1; background: rgba(255,255,255,.03); border: 1px solid var(--border-subtle);
+    border-radius: 6px; padding: 6px 8px; color: var(--text-primary); font-size: 12px;
+  }
+  .popover-footer { display: flex; gap: 8px; }
+  .popover-clear-btn, .popover-close-btn {
+    flex: 1; padding: 8px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;
+    background: rgba(255,255,255,0.05); border: 1px solid var(--border-subtle); color: var(--text-primary);
+  }
+
+  /* Config modal */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(5, 11, 22, 0.85); backdrop-filter: blur(8px);
+    z-index: 2000; display: flex; align-items: center; justify-content: center; padding: 20px;
+    opacity: 0; pointer-events: none; transition: opacity 0.3s;
+  }
+  .modal-overlay.active { opacity: 1; pointer-events: auto; }
+  .modal-content {
+    background: var(--modal-bg); border: 1px solid var(--border-subtle); border-radius: 20px;
+    width: 100%; max-width: 480px; padding: 28px; max-height: 85vh; overflow-y: auto;
+    transform: scale(0.95) translateY(10px); transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .modal-overlay.active .modal-content { transform: scale(1) translateY(0); }
+  .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+  .modal-header h2 { font-size: 18px; font-weight: 700; color: var(--text-primary); }
+  .modal-close-btn { background: none; border: none; color: var(--text-secondary); cursor: pointer; }
+  .modal-section { margin-bottom: 20px; }
+  .modal-label { display: block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-secondary); margin-bottom: 8px; }
+  .modal-hint { font-size: 11px; color: var(--text-secondary); margin-top: 6px; opacity: 0.7; }
+  .weekday-checks { display: flex; flex-wrap: wrap; gap: 10px; }
+  .weekday-check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-primary); cursor: pointer; }
+  #full-day-hours {
+    width: 100%; background: rgba(255,255,255,.03); border: 1px solid var(--border-subtle);
+    border-radius: 8px; padding: 10px 12px; color: var(--text-primary); font-size: 14px;
+  }
+  .holiday-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; max-height: 160px; overflow-y: auto; }
+  .holiday-row {
+    display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-primary);
+    background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 10px;
+  }
+  .holiday-date { font-weight: 700; opacity: 0.8; }
+  .holiday-label { flex: 1; }
+  .holiday-remove-btn { background: none; border: none; color: var(--att-absent); font-size: 16px; cursor: pointer; line-height: 1; }
+  .holiday-add-row { display: flex; gap: 8px; }
+  .holiday-add-row input {
+    background: rgba(255,255,255,.03); border: 1px solid var(--border-subtle); border-radius: 8px;
+    padding: 8px 10px; color: var(--text-primary); font-size: 12px;
+  }
+  #holiday-date-input { flex: 0 0 140px; }
+  #holiday-label-input { flex: 1; }
+  .holiday-add-btn {
+    background: rgba(237, 102, 33, 0.15); border: 1px solid rgba(237, 102, 33, 0.35);
+    color: var(--ntv-orange); border-radius: 8px; padding: 0 14px; font-size: 12px; font-weight: 700; cursor: pointer;
+  }
+  .modal-actions { margin-top: 10px; }
+  .save-btn { width: 100%; padding: 12px 24px; background: var(--ntv-gradient); color: white; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
+
+  @media (max-width: 900px) {
+    #portal-main { margin-left: 0; padding: 24px 16px; width: 100%; overflow-x: hidden; }
+    .day-cell { min-height: 52px; }
+  }
+
+  @media (max-width: 768px) {
+    .actions-bar { flex-direction: column; align-items: stretch; gap: 12px; padding: 12px; }
+    .month-selector { flex-direction: column; align-items: stretch; width: 100%; gap: 8px; }
+    .att-select { width: 100%; }
+    .config-btn { width: 100%; justify-content: center; }
+    .legend { gap: 10px 14px; font-size: 11px; }
+    .page-header h1 { font-size: 22px; }
+  }
+
+  @media (max-width: 600px) {
+    .calendar-grid { gap: 4px; padding: 8px; }
+    .weekday-header { font-size: 9px; padding-bottom: 4px; }
+    .day-cell { min-height: 46px; padding: 4px; font-size: 9px; border-radius: 6px; }
+    .day-num { font-size: 11px; }
+    .day-hours { font-size: 8px; }
+    .holiday-dot { top: 4px; right: 4px; width: 5px; height: 5px; }
+    /* Collapse the "UT" text badge into a small dot so it doesn't collide with the hours label in a ~46px cell */
+    .undertime-badge {
+      font-size: 0; width: 6px; height: 6px; min-width: 0; padding: 0; border-radius: 50%;
+      bottom: 4px; left: 4px;
+    }
+
+    .status-popover { padding: 12px; }
+    .status-btn { padding: 10px 8px; font-size: 12px; }
+    .popover-clear-btn, .popover-close-btn { padding: 10px; }
+
+    .modal-content { padding: 20px; border-radius: 16px; }
+    .modal-overlay { padding: 12px; }
+    .holiday-add-row { flex-wrap: wrap; }
+    #holiday-date-input { flex: 1 1 100%; }
+    #holiday-label-input { flex: 1 1 auto; }
+    .holiday-add-btn { flex: 0 0 auto; }
+  }
+
+  @media (max-width: 380px) {
+    .day-cell { min-height: 42px; }
+    .day-hours { display: none; }
+  }
+</style>
