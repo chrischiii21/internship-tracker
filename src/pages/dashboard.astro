@@ -45,10 +45,12 @@ const allRawEntries = await getTrackedEntries(user.id, user.email, settings, act
 // Counted against its start date, the same day stopTimer will file it under.
 const liveTimer = await getActiveTimer(user.id, settings.isEmployee ?? false);
 let liveSeconds = 0;
+let liveDateStr = '';
 if (liveTimer) {
   const liveStart = new Date(liveTimer.startTime);
   liveSeconds = Math.max(0, Math.floor((Date.now() - liveStart.getTime()) / 1000));
-  allRawEntries.push({ date: manilaDate(liveStart), durationSeconds: liveSeconds });
+  liveDateStr = manilaDate(liveStart);
+  allRawEntries.push({ date: liveDateStr, durationSeconds: liveSeconds });
   renderedHours += liveSeconds / 3600;
 }
 
@@ -123,11 +125,14 @@ const monthWeeksData: { label: string, from: string, to: string, isCurrent: bool
     };
   });
 
+// Weekly Activity only counts a session once it's stopped — a running timer keeps ticking on
+// the Today tile, but shouldn't inflate this week's row until it lands as a closed entry.
 Object.entries(dailyHoursMap).forEach(([d, h]) => {
   const week = monthWeeksData.find(w => d >= w.from && d <= w.to);
   if (!week) return;
-  week.hours += h;
-  if (h > 0) week.days++;
+  const closedH = d === liveDateStr ? Math.max(0, h - liveSeconds / 3600) : h;
+  week.hours += closedH;
+  if (closedH > 0) week.days++;
 });
 const maxWeekHours = Math.max(1, ...monthWeeksData.map(w => w.hours));
 const bestDayHours = Math.max(0, ...Object.values(dailyHoursMap));
