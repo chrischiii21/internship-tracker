@@ -730,19 +730,35 @@ if (!settings.isEmployee) {
                 ? `Counting up live — ${todayEntryCount} closed ${todayEntryCount === 1 ? 'entry' : 'entries'} today plus the session running now.`
                 : `${todayEntryCount} ${todayEntryCount === 1 ? 'entry' : 'entries'} logged today. Time In from the header to start counting.`}
             </p>
+            {liveStartedToday && (
+              <p class="stat-explain" id="today-eta">&nbsp;</p>
+            )}
           </div>
-          <script is:inline>
+          <script is:inline define:vars={{ DAILY_TARGET_SECONDS: 8 * 3600 }}>
             // Keeps the Today tile ticking while a session is open. Time In/Out reloads the page,
             // so the closed base below is never stale.
             {
               const el = document.getElementById('today-total');
+              const etaEl = document.getElementById('today-eta');
               const startedAt = el && el.dataset.liveStart ? new Date(el.dataset.liveStart).getTime() : null;
               if (startedAt) {
                 const closed = Number(el.dataset.closed) || 0;
                 const pad = (n) => String(n).padStart(2, '0');
                 const tick = () => {
-                  const t = closed + Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+                  const elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+                  const t = closed + elapsed;
                   el.textContent = `${pad(Math.floor(t / 3600))}:${pad(Math.floor((t % 3600) / 60))}:${pad(t % 60)}`;
+
+                  if (etaEl) {
+                    const remaining = DAILY_TARGET_SECONDS - t;
+                    if (remaining > 0) {
+                      const clockOut = new Date(Date.now() + remaining * 1000);
+                      const time = clockOut.toLocaleTimeString('en-US', { timeZone: 'Asia/Manila', hour: 'numeric', minute: '2-digit' });
+                      etaEl.textContent = `On pace to hit 8 hrs at ${time}.`;
+                    } else {
+                      etaEl.textContent = `8-hour day already complete.`;
+                    }
+                  }
                 };
                 tick();
                 setInterval(tick, 1000);
