@@ -82,6 +82,35 @@ const { user } = Astro.props;
   </div>
 </div>
 
+<!-- PUNCH MODAL -->
+<!-- Stands between the Time In/Out button and the timer. Two jobs: remind the user to tap their
+     company's RFID reader (this tracker can't punch them in or out over there), and capture the
+     time they actually tapped, so the entry matches that record instead of whenever they got
+     around to opening this app. -->
+<div id="punch-modal" class="modal-overlay">
+  <div class="modal-content">
+    <div class="modal-header">
+      <div class="punch-icon">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M7 15h4"/><circle cx="16" cy="12" r="2.5"/></svg>
+      </div>
+      <h2 id="punch-title">Tap in first</h2>
+    </div>
+    <p class="modal-desc" id="punch-desc"></p>
+
+    <div class="punch-field">
+      <label for="punch-time-input" id="punch-time-label">Time you tapped in</label>
+      <input type="time" id="punch-time-input" class="punch-time-input" />
+    </div>
+    <p class="punch-summary" id="punch-summary"></p>
+    <p class="punch-error" id="punch-error" style="display: none;"></p>
+
+    <div class="modal-actions">
+      <button type="button" id="punch-cancel" class="btn-cancel">Cancel</button>
+      <button type="button" id="punch-confirm" class="btn-confirm-punch">Start Timer</button>
+    </div>
+  </div>
+</div>
+
 <style>
   #sys-header {
     position: fixed; top: 0; left: 0; right: 0; z-index: 100;
@@ -240,6 +269,44 @@ const { user } = Astro.props;
     cursor: pointer; transition: all 0.2s;
   }
   .btn-confirm-logout:hover { filter: brightness(1.1); transform: translateY(-1px); box-shadow: 0 4px 15px rgba(237, 102, 33, 0.3); }
+
+  .punch-icon {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 56px; height: 56px; background: rgba(237, 102, 33, 0.1);
+    color: var(--ntv-orange); border-radius: 50%; margin-bottom: 16px;
+    border: 1px solid rgba(237, 102, 33, 0.2);
+  }
+  .punch-field {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    margin: 18px 0 10px; padding: 12px 14px;
+    background: rgba(255, 255, 255, 0.04); border: 1px solid var(--border-subtle); border-radius: 12px;
+  }
+  .punch-field label { font-size: 13px; font-weight: 600; color: var(--text-secondary); }
+  .punch-time-input {
+    background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border-subtle); border-radius: 8px;
+    color: var(--text-primary); font-family: 'JetBrains Mono', monospace; font-size: 15px;
+    font-weight: 600; padding: 8px 10px; min-width: 120px;
+  }
+  .punch-time-input:focus { outline: none; border-color: var(--ntv-orange); }
+  .punch-summary {
+    font-size: 12.5px; color: var(--text-secondary); text-align: center;
+    margin: 0 0 4px; min-height: 18px;
+  }
+  .punch-error {
+    font-size: 12.5px; color: #ff6b6b; text-align: center; margin: 4px 0 0;
+  }
+  .btn-confirm-punch {
+    display: block; text-align: center; width: 100%; padding: 14px;
+    background: var(--ntv-gradient); color: #fff; border: none; border-radius: 12px;
+    font-size: 14px; font-weight: 700; cursor: pointer; transition: all 0.2s;
+  }
+  .btn-confirm-punch:hover:not(:disabled) { filter: brightness(1.1); transform: translateY(-1px); box-shadow: 0 4px 15px rgba(237, 102, 33, 0.3); }
+  .btn-confirm-punch:disabled { opacity: 0.6; cursor: not-allowed; }
+
+  @media (max-width: 520px) {
+    .punch-field { flex-direction: column; align-items: stretch; }
+    .punch-time-input { width: 100%; }
+  }
   
   .btn-cancel {
     width: 100%; padding: 14px; background: rgba(255, 255, 255, 0.05); color: var(--text-primary);
@@ -465,14 +532,118 @@ const { user } = Astro.props;
       } catch (e) {}
     }
 
-    btn.addEventListener('click', async () => {
+    // ---- Punch modal -------------------------------------------------------------------
+    // The Time In/Out button no longer punches directly. It opens a confirmation that reminds
+    // the user to tap their company's attendance reader and asks what time they tapped, so this
+    // tracker's entry lines up with that record rather than with their reaction time.
+    const punchModal = document.getElementById('punch-modal');
+    const punchTitle = document.getElementById('punch-title');
+    const punchDesc = document.getElementById('punch-desc');
+    const punchTimeLabel = document.getElementById('punch-time-label');
+    const punchInput = document.getElementById('punch-time-input');
+    const punchSummary = document.getElementById('punch-summary');
+    const punchError = document.getElementById('punch-error');
+    const punchConfirm = document.getElementById('punch-confirm');
+    const punchCancel = document.getElementById('punch-cancel');
+
+    let punchMode = 'in';
+
+    function manilaNowHHMM() {
+      const parts = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Asia/Manila', hour: '2-digit', minute: '2-digit', hour12: false,
+      }).formatToParts(new Date());
+      const h = parts.find((p) => p.type === 'hour')?.value ?? '00';
+      const m = parts.find((p) => p.type === 'minute')?.value ?? '00';
+      return `${h === '24' ? '00' : h}:${m}`;
+    }
+
+    function fmtClock(ms) {
+      return new Date(ms).toLocaleTimeString('en-US', {
+        timeZone: 'Asia/Manila', hour: 'numeric', minute: '2-digit', hour12: true,
+      });
+    }
+
+    // Mirrors the server's punch resolution so the preview can't disagree with what gets saved:
+    // a punch-in later than now belongs to yesterday, a punch-out before the start to tomorrow.
+    function resolvePunchInMs(timeStr) {
+      const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
+      const ms = new Date(`${today}T${timeStr}:00+08:00`).getTime();
+      return ms > Date.now() + 60000 ? ms - 86400000 : ms;
+    }
+
+    function resolvePunchOutMs(timeStr, startMs) {
+      const startDay = new Date(startMs).toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
+      const ms = new Date(`${startDay}T${timeStr}:00+08:00`).getTime();
+      return ms < startMs ? ms + 86400000 : ms;
+    }
+
+    function updatePunchSummary() {
+      if (!punchInput || !punchSummary) return;
+      const value = punchInput.value;
+      if (!/^\d{2}:\d{2}$/.test(value)) {
+        punchSummary.textContent = '';
+        if (punchConfirm) punchConfirm.disabled = true;
+        return;
+      }
+      if (punchConfirm) punchConfirm.disabled = false;
+
+      if (punchMode === 'in') {
+        const ms = resolvePunchInMs(value);
+        const agoMin = Math.round((Date.now() - ms) / 60000);
+        punchSummary.textContent = agoMin > 1
+          ? `Timer starts at ${fmtClock(ms)} — ${agoMin} min ago`
+          : `Timer starts at ${fmtClock(ms)}`;
+      } else if (startTimeMs != null) {
+        const endMs = resolvePunchOutMs(value, startTimeMs);
+        const future = endMs > Date.now() + 60000;
+        punchSummary.textContent = future
+          ? 'That time is in the future — check the reader.'
+          : `${fmtClock(startTimeMs)} → ${fmtClock(endMs)} · ${formatElapsed(endMs - startTimeMs)}`;
+        if (punchConfirm) punchConfirm.disabled = future;
+      }
+    }
+
+    function openPunchModal(isActive) {
+      punchMode = isActive ? 'out' : 'in';
+      if (punchError) { punchError.style.display = 'none'; punchError.textContent = ''; }
+
+      if (punchTitle) punchTitle.textContent = punchMode === 'in' ? 'Tap in first' : 'Tap out first';
+      if (punchDesc) {
+        punchDesc.textContent = punchMode === 'in'
+          ? "If your company records attendance on its own system — an RFID reader, a portal — tap in there before starting this timer. This tracker can't punch you in over there."
+          : "Tap out on your company's reader before stopping this timer. Its record is the one that counts, and a missed tap leaves that day open.";
+      }
+      if (punchTimeLabel) punchTimeLabel.textContent = punchMode === 'in' ? 'Time you tapped in' : 'Time you tapped out';
+      if (punchConfirm) punchConfirm.textContent = punchMode === 'in' ? 'Start Timer' : 'Stop Timer';
+      if (punchInput) punchInput.value = manilaNowHHMM();
+
+      updatePunchSummary();
+      punchModal?.classList.add('active');
+      // Focusing the input would pop the mobile keyboard over the reminder text, which is the
+      // part that needs reading — "now" is already filled in for the common case.
+      punchConfirm?.focus();
+    }
+
+    function closePunchModal() {
+      punchModal?.classList.remove('active');
+      btn.disabled = false;
+    }
+
+    async function submitPunch() {
+      const time = punchInput?.value;
+      if (!/^\d{2}:\d{2}$/.test(time || '')) return;
+
+      punchModal?.classList.remove('active');
       btn.disabled = true;
       // The request is followed by a full page reload, so cover both with the global overlay —
       // otherwise the punch looks like it did nothing until the page happens to come back.
-      const wasActive = btn.classList.contains('on');
-      window.showLoadingSpinner?.(wasActive ? 'TIMING OUT...' : 'TIMING IN...');
+      window.showLoadingSpinner?.(punchMode === 'out' ? 'TIMING OUT...' : 'TIMING IN...');
       try {
-        const res = await fetch('/api/timer/toggle', { method: 'POST' });
+        const res = await fetch('/api/timer/toggle', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ time }),
+        });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Failed to toggle timer');
         render(data.active, data.startTime);
@@ -490,10 +661,32 @@ const { user } = Astro.props;
           window.location.reload();
         }
       } catch (err) {
+        // Server-side rejections (future punch-out, punch-in older than a day) are about the
+        // time that was typed, so reopen the modal with the message instead of dropping the
+        // user back to a button that looks like it did nothing.
         window.hideLoadingSpinner?.();
-        window.showToast?.(err.message || 'Error toggling timer', 'error');
+        if (punchError) {
+          punchError.textContent = err.message || 'Error toggling timer';
+          punchError.style.display = 'block';
+        }
+        punchModal?.classList.add('active');
         btn.disabled = false;
       }
+    }
+
+    btn.addEventListener('click', () => {
+      btn.disabled = true;
+      openPunchModal(btn.classList.contains('on'));
+    });
+
+    punchInput?.addEventListener('input', updatePunchSummary);
+    punchConfirm?.addEventListener('click', submitPunch);
+    punchCancel?.addEventListener('click', closePunchModal);
+    punchModal?.addEventListener('click', (e) => {
+      if (e.target === punchModal) closePunchModal();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && punchModal?.classList.contains('active')) closePunchModal();
     });
 
     loadStatus();

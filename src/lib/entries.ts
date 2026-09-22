@@ -232,14 +232,79 @@ export async function getActiveTimer(userId: string, isEmployee: boolean = false
   }
 }
 
-export async function startTimer(userId: string, description: string = '', isEmployee: boolean = false) {
+// Punches are entered as the wall-clock time the user read off their company's RFID reader, so
+// an HH:mm has to be anchored to a real calendar date in Manila. "Today" is the wrong assumption
+// on a shift that crosses midnight, so both directions roll a day when the naive answer is
+// impossible — a 10 PM punch-in typed at 00:30 belongs to yesterday, and a 6 AM punch-out on a
+// timer started at 10 PM belongs to tomorrow.
+const MANILA_TZ = 'Asia/Manila';
+// Clock skew between the user's device and the server shouldn't read as "in the future".
+const FUTURE_TOLERANCE_MS = 60 * 1000;
+// Nobody works a single session longer than this. Past it, the timer was forgotten rather than
+// running, so the punch is closed at one shift's length instead of banking the whole gap.
+const FORGOTTEN_TIMER_SECONDS = 24 * 3600;
+
+function manilaDateStr(d: Date) {
+  return d.toLocaleDateString('en-CA', { timeZone: MANILA_TZ });
+}
+
+function manilaDateTime(dateStr: string, timeStr: string) {
+  const withSeconds = timeStr.split(':').length === 2 ? `${timeStr}:00` : timeStr;
+  return new Date(`${dateStr}T${withSeconds}+08:00`);
+}
+
+function addDays(dateStr: string, days: number) {
+  const d = new Date(`${dateStr}T00:00:00+08:00`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return manilaDateStr(d);
+}
+
+export function resolvePunchIn(timeStr: string, now: Date = new Date()) {
+  let candidate = manilaDateTime(manilaDateStr(now), timeStr);
+  if (isNaN(candidate.getTime())) throw new Error('That punch-in time is not a valid time.');
+  // A punch-in "later than now" is a shift that started before midnight.
+  if (candidate.getTime() > now.getTime() + FUTURE_TOLERANCE_MS) {
+    candidate = manilaDateTime(addDays(manilaDateStr(now), -1), timeStr);
+  }
+  return candidate;
+}
+
+export function resolvePunchOut(timeStr: string, start: Date, now: Date = new Date()) {
+  let candidate = manilaDateTime(manilaDateStr(start), timeStr);
+  if (isNaN(candidate.getTime())) throw new Error('That punch-out time is not a valid time.');
+  // A punch-out before the punch-in means the shift ran past midnight.
+  if (candidate.getTime() < start.getTime()) {
+    candidate = manilaDateTime(addDays(manilaDateStr(start), 1), timeStr);
+  }
+  // Rolling forward can overshoot into the future — that's a typo, not a night shift.
+  if (candidate.getTime() > now.getTime() + FUTURE_TOLERANCE_MS) {
+    throw new Error("That time-out is in the future. Check the time you read off the reader.");
+  }
+  return candidate;
+}
+
+export async function startTimer(
+  userId: string,
+  description: string = '',
+  isEmployee: boolean = false,
+  punchInTime?: string
+) {
+  const now = new Date();
+  const start = punchInTime ? resolvePunchIn(punchInTime, now) : now;
+
+  // Backdating exists so the timer matches a tap made minutes ago, not to rewrite old days —
+  // those belong in Manual Adjustment, which can set both ends.
+  if (now.getTime() - start.getTime() > FORGOTTEN_TIMER_SECONDS * 1000) {
+    throw new Error('That punch-in is more than a day ago. Use Manual Adjustment to log an earlier day.');
+  }
+
   const { data, error } = await supabase
     .from('active_timers')
     .upsert({
       user_id: userId,
       description,
-      start_time: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+      start_time: start.toISOString(),
+      updated_at: now.toISOString(),
       is_employee: isEmployee
     })
     .select()
@@ -249,11 +314,12 @@ export async function startTimer(userId: string, description: string = '', isEmp
   return data;
 }
 
-// Nobody works a single session longer than this. Past it, the timer was forgotten rather than
-// running, so the punch is closed at one shift's length instead of banking the whole gap.
-const FORGOTTEN_TIMER_SECONDS = 24 * 3600;
-
-export async function stopTimer(userId: string, description: string, isEmployee: boolean = false) {
+export async function stopTimer(
+  userId: string,
+  description: string,
+  isEmployee: boolean = false,
+  punchOutTime?: string
+) {
   const timer = await getActiveTimer(userId, isEmployee);
   if (!timer) throw new Error('No active timer found');
 
@@ -264,8 +330,10 @@ export async function stopTimer(userId: string, description: string, isEmployee:
 
   const now = new Date();
   const start = new Date(timer.startTime);
-  let durationSeconds = Math.max(0, Math.floor((now.getTime() - start.getTime()) / 1000));
-  let end = now;
+  // An explicit punch-out anchors to the day the timer started, so a session left running for
+  // days still closes at the hour the user actually tapped out rather than being capped blindly.
+  let end = punchOutTime ? resolvePunchOut(punchOutTime, start, now) : now;
+  let durationSeconds = Math.max(0, Math.floor((end.getTime() - start.getTime()) / 1000));
   let capped = false;
 
   if (durationSeconds > FORGOTTEN_TIMER_SECONDS) {
