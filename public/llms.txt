@@ -1,0 +1,11 @@
+# InternFlow
+
+> InternFlow tracks internship hours, auto-builds Daily Time Records (DTR), and charts attendance — interns sign in with Google, no separate password needed.
+
+InternFlow is a web application for student interns and their coordinators. Interns clock in/out with hours syncing automatically, get an auto-generated DTR, and see a calendar view of attendance (present, absent, WFH, sick, vacation) with a live countdown to required hours. Coordinators get a roster view of every intern's hours, DTR status, and attendance.
+
+## Pages
+
+- [Home](https://internship-tracker-self.vercel.app/): Product overview, features, and FAQ.
+
+Most application pages (dashboard, tracker, DTR, attendance, settings) require Google sign-in and are not publicly indexable.
