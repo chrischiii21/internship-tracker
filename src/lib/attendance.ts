@@ -37,6 +37,7 @@ export interface DayAttendance {
   status: EffectiveStatus;
   isHalfDay: boolean;
   isUndertime: boolean;
+  isOngoing: boolean;
   reason: string | null;
   source: 'override' | 'auto' | 'calendar' | 'none';
 }
@@ -214,7 +215,12 @@ export function computeMonthlyAttendance(
   dailyTotals: Record<number, number>,
   overrides: AttendanceOverride[],
   holidays: Holiday[],
-  config: AttendanceConfig
+  config: AttendanceConfig,
+  // Days strictly before this one with no override/logs/calendar exemption are auto-marked absent
+  // instead of sitting blank. Defaults to "now" in the org's timezone; passable for tests.
+  todayDate: string = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' }),
+  // The date (if any) with a currently-running timer, so today's cell can show it's in progress.
+  ongoingDate: string | null = null
 ): DayAttendance[] {
   const daysInMonth = new Date(year, month, 0).getDate();
   const overrideByDate = new Map(overrides.map(o => [o.date, o]));
@@ -252,6 +258,11 @@ export function computeMonthlyAttendance(
       isHalfDay = false;
       isUndertime = false;
       source = 'calendar';
+    } else if (date < todayDate) {
+      status = 'absent';
+      isHalfDay = false;
+      isUndertime = false;
+      source = 'auto';
     } else {
       status = 'unmarked';
       isHalfDay = false;
@@ -270,6 +281,7 @@ export function computeMonthlyAttendance(
       status,
       isHalfDay,
       isUndertime,
+      isOngoing: date === ongoingDate,
       reason,
       source,
     });
@@ -285,7 +297,8 @@ export async function getMonthlyAttendance(
   isEmployee: boolean,
   month: number,
   year: number,
-  dailyTotals: Record<number, number>
+  dailyTotals: Record<number, number>,
+  ongoingDate: string | null = null
 ): Promise<{ days: DayAttendance[]; config: AttendanceConfig; holidays: Holiday[] }> {
   const [config, holidays, overrides] = await Promise.all([
     getAttendanceConfig(userId),
@@ -293,7 +306,7 @@ export async function getMonthlyAttendance(
     getOverridesForMonth(userId, isEmployee, month, year),
   ]);
 
-  const days = computeMonthlyAttendance(month, year, dailyTotals, overrides, holidays, config);
+  const days = computeMonthlyAttendance(month, year, dailyTotals, overrides, holidays, config, undefined, ongoingDate);
 
   return { days, config, holidays };
 }

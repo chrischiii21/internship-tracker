@@ -6,7 +6,7 @@ import { getSession } from "../lib/auth";
 import { parse } from "cookie";
 import { getClockifyUser, getDailyDTR } from "../lib/clockify";
 import { getAppSettings } from "../lib/settings";
-import { getManualEntries } from "../lib/entries";
+import { getManualEntries, getActiveTimer } from "../lib/entries";
 import { supabase } from "../lib/supabase";
 import { getMonthlyAttendance } from "../lib/attendance";
 
@@ -99,7 +99,16 @@ const dtrResult = await getDailyDTR(clockifyId, month, year, manualFiltered);
 const dailyTotals: Record<number, number> = {};
 for (const d of dtrResult.days) dailyTotals[parseInt(d.day)] = d.totalSeconds;
 
-const { days, config, holidays } = await getMonthlyAttendance(viewUserId, viewIsEmployee, month, year, dailyTotals);
+// A running (not yet clocked out) timer has no `end`, so getDailyDTR never counts it into
+// dailyTotals — without this, today's cell sits blank while the intern is actively clocked in.
+const activeTimer = await getActiveTimer(viewUserId, viewIsEmployee);
+const ongoingDate = activeTimer
+  ? new Date(activeTimer.startTime).toLocaleDateString("en-CA", { timeZone: "Asia/Manila" })
+  : null;
+
+const { days, config, holidays } = await getMonthlyAttendance(viewUserId, viewIsEmployee, month, year, dailyTotals, ongoingDate);
+
+const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
 
 const monthName = new Date(year, month - 1)
   .toLocaleDateString("en-US", { month: "long", timeZone: "Asia/Manila" })
@@ -210,10 +219,8 @@ for (const d of days) {
         <span class="legend-item"><i class="swatch wfh"></i>WFH</span>
         <span class="legend-item"><i class="swatch sl"></i>Sick Leave</span>
         <span class="legend-item"><i class="swatch vl"></i>Vacation Leave</span>
-        <span class="legend-item"><i class="swatch half"></i>Half-day</span>
-        <span class="legend-item"><i class="swatch undertime"></i>Undertime</span>
         <span class="legend-item"><i class="swatch non-working"></i>Non-working</span>
-        <span class="legend-item"><i class="swatch unmarked"></i>Unmarked</span>
+        <span class="legend-item"><i class="swatch ongoing"></i>Ongoing</span>
       </div>
 
       <div class="calendar-wrapper">
@@ -222,7 +229,7 @@ for (const d of days) {
           {Array.from({ length: leadingBlanks }).map(() => <div class="day-cell blank"></div>)}
           {days.map((d) => (
             <div
-              class={`day-cell status-${d.status} ${d.isHalfDay ? 'half-day' : ''} ${d.isUndertime ? 'undertime' : ''} ${isEditable ? 'editable' : ''}`}
+              class={`day-cell status-${d.status} ${d.isHalfDay ? 'half-day' : ''} ${d.isUndertime ? 'undertime' : ''} ${d.isOngoing ? 'ongoing' : ''} ${isEditable ? 'editable' : (d.date <= todayStr ? 'viewable' : '')}`}
               data-day={d.day}
               data-date={d.date}
               data-status={d.status}
@@ -264,6 +271,7 @@ for (const d of days) {
   {isEditable && (
     <div id="status-popover" class="status-popover hidden">
       <div class="popover-date" id="popover-date"></div>
+      <button type="button" id="popover-view-logs" class="popover-view-logs-btn">View time logs for this day</button>
       <label class="range-toggle">
         <input type="checkbox" id="popover-range-toggle" />
         Apply to a date range
@@ -347,9 +355,21 @@ for (const d of days) {
       </div>
     </div>
   )}
+
+  <div id="day-details-modal" class="modal-overlay">
+    <div class="modal-content day-details-content">
+      <div class="modal-header">
+        <h2 id="day-details-title">Time logs</h2>
+        <button id="day-details-close" class="modal-close-btn" aria-label="Close">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div id="day-details-body" class="day-details-body"></div>
+    </div>
+  </div>
 </Layout>
 
-<script define:vars={{ isEditable }}>
+<script define:vars={{ isEditable, todayStr }}>
   const secSel = document.getElementById("section-selector");
   const sSel = document.getElementById("student-selector");
   const modeSel = document.getElementById("mode-selector");
@@ -370,8 +390,77 @@ for (const d of days) {
   mSel?.addEventListener("change", update);
   ySel?.addEventListener("change", update);
 
+  // Day details modal — lists that day's actual time-tracker sessions (manual + Clockify).
+  // Shared by both the read-only coordinator view (click a day directly) and the editable
+  // view (a link inside the status popover, so it doesn't compete with the status-editing click).
+  const detailsModal = document.getElementById("day-details-modal");
+  const detailsTitle = document.getElementById("day-details-title");
+  const detailsBody = document.getElementById("day-details-body");
+  const pageParams = new URLSearchParams(window.location.search);
+
+  const formatClock = (t) => {
+    if (!t) return "--";
+    const [h, m] = t.split(":");
+    const hour = parseInt(h, 10);
+    const ampm = hour >= 12 ? "PM" : "AM";
+    const h12 = hour % 12 === 0 ? 12 : hour % 12;
+    return `${h12}:${m} ${ampm}`;
+  };
+  const formatDuration = (seconds) => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.round((seconds % 3600) / 60);
+    return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  };
+  const escapeHtml = (s) => (s || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+  const closeDayDetails = () => detailsModal?.classList.remove("active");
+  document.getElementById("day-details-close")?.addEventListener("click", closeDayDetails);
+  detailsModal?.addEventListener("click", (e) => { if (e.target === detailsModal) closeDayDetails(); });
+
+  async function openDayDetails(date) {
+    if (!date || date > todayStr) return;
+    detailsModal.classList.add("active");
+    detailsTitle.textContent = new Date(`${date}T00:00:00`).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+    detailsBody.innerHTML = '<div class="day-details-loading">Loading…</div>';
+
+    const url = new URL("/api/attendance/day-entries", window.location.origin);
+    url.searchParams.set("date", date);
+    if (pageParams.get("studentId")) url.searchParams.set("studentId", pageParams.get("studentId"));
+    if (pageParams.get("mode")) url.searchParams.set("mode", pageParams.get("mode"));
+
+    try {
+      const res = await fetch(url);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to load time logs");
+
+      if (!data.items.length) {
+        detailsBody.innerHTML = '<div class="day-details-empty">No time logged for this day.</div>';
+        return;
+      }
+
+      const rows = data.items.map((item) => `
+        <li class="day-details-item">
+          <span class="ddi-desc">${escapeHtml(item.description)}</span>
+          <span class="ddi-time">${formatClock(item.startTime)} – ${formatClock(item.endTime)}</span>
+          <span class="ddi-duration">${formatDuration(item.durationSeconds)}</span>
+        </li>
+      `).join("");
+
+      detailsBody.innerHTML = `
+        <ul class="day-details-list">${rows}</ul>
+        <div class="day-details-total">Total: ${formatDuration(data.totalSeconds)}</div>
+      `;
+    } catch (err) {
+      detailsBody.innerHTML = `<div class="day-details-empty">${err.message || "Error loading time logs"}</div>`;
+    }
+  }
+
   if (!isEditable) {
-    // Nothing else to wire up for read-only (coordinator) view.
+    document.getElementById("calendar-grid")?.addEventListener("click", (e) => {
+      const cell = e.target.closest(".day-cell.viewable");
+      if (!cell) return;
+      openDayDetails(cell.dataset.date);
+    });
   } else {
     const popover = document.getElementById("status-popover");
     const popoverDate = document.getElementById("popover-date");
@@ -380,6 +469,7 @@ for (const d of days) {
     const rangeFields = document.getElementById("popover-range-fields");
     const endDateInput = document.getElementById("popover-end-date");
     const reasonInput = document.getElementById("popover-reason");
+    const viewLogsBtn = document.getElementById("popover-view-logs");
     let activeCell = null;
     // Bumped every time a save starts; a completing request only releases the popover's shared
     // busy state if it's still the most recent one — otherwise a slow, stale request finishing
@@ -446,6 +536,7 @@ for (const d of days) {
       });
 
       popoverDate.textContent = `${cell.dataset.date} — currently ${statusLabel(cell.dataset.status)}`;
+      if (viewLogsBtn) viewLogsBtn.style.display = cell.dataset.date <= todayStr ? '' : 'none';
       halfDayCheckbox.checked = cell.dataset.half === '1';
 
       reasonInput.value = cell.dataset.reason || '';
@@ -467,6 +558,12 @@ for (const d of days) {
     });
 
     document.getElementById("popover-close")?.addEventListener("click", closePopover);
+    viewLogsBtn?.addEventListener("click", () => {
+      if (!activeCell) return;
+      const date = activeCell.dataset.date;
+      closePopover();
+      openDayDetails(date);
+    });
     document.addEventListener("click", (e) => {
       if (!activeCell) return;
       if (popover.contains(e.target) || e.target.closest(".day-cell")) return;
@@ -714,10 +811,8 @@ for (const d of days) {
   .swatch.wfh { background: var(--att-wfh); }
   .swatch.sl { background: var(--att-sl); }
   .swatch.vl { background: var(--att-vl); }
-  .swatch.half { background: linear-gradient(135deg, var(--att-present) 50%, var(--att-cell-empty) 50%); }
-  .swatch.undertime { background: var(--att-present); border: 2px dashed rgba(5, 11, 22, 0.45); }
   .swatch.non-working { background: var(--att-nonworking-bg); border: 1px solid var(--border-subtle); }
-  .swatch.unmarked { background: var(--att-cell-empty); border: 1px dashed var(--border-subtle); }
+  .swatch.ongoing { background: var(--att-cell-empty); border: 2px solid #60a5fa; box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.25); }
 
   .calendar-wrapper { max-width: 900px; margin: 0 auto; }
   .calendar-grid {
@@ -775,8 +870,8 @@ for (const d of days) {
     background: rgba(5, 11, 22, 0.35); color: inherit;
   }
 
-  .day-cell.editable { cursor: pointer; transition: transform 0.15s; }
-  .day-cell.editable:hover { transform: translateY(-1px); box-shadow: 0 4px 10px rgba(0,0,0,0.25); }
+  .day-cell.editable, .day-cell.viewable { cursor: pointer; transition: transform 0.15s; }
+  .day-cell.editable:hover, .day-cell.viewable:hover { transform: translateY(-1px); box-shadow: 0 4px 10px rgba(0,0,0,0.25); }
 
   /* A separate overlay element (not a class on the cell itself) so it survives the cell's
      className being fully replaced mid-request when the new status is applied. */
@@ -809,6 +904,14 @@ for (const d of days) {
   .day-cell.status-non-working { background: var(--att-nonworking-bg); color: var(--att-nonworking-text); }
   .day-cell.status-unmarked { background: var(--att-cell-empty); border: 1px dashed var(--border-subtle); }
 
+  /* Today's cell while a timer is actively running — no logged time yet, so the status colors
+     above don't apply, but a blank cell would read as "not present" while clocked in. */
+  .day-cell.ongoing { box-shadow: 0 0 0 2px #60a5fa; animation: ongoing-pulse 2s ease-in-out infinite; }
+  @keyframes ongoing-pulse {
+    0%, 100% { box-shadow: 0 0 0 2px #60a5fa; }
+    50% { box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.4); }
+  }
+
   /* Status popover */
   .status-popover {
     position: fixed; z-index: 3000; background: var(--modal-bg); border: 1px solid var(--border-subtle);
@@ -837,6 +940,11 @@ for (const d of days) {
     opacity: 0.6; cursor: not-allowed;
   }
   .popover-date { font-size: 11px; color: var(--text-secondary); margin-bottom: 10px; }
+  .popover-view-logs-btn {
+    display: block; width: 100%; text-align: left; margin-bottom: 10px; padding: 0;
+    background: none; border: none; color: var(--ntv-orange); font-size: 11.5px; font-weight: 600;
+    cursor: pointer; text-decoration: underline;
+  }
   .popover-buttons-label { font-size: 11px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; }
   .popover-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 10px; }
   .status-btn { padding: 8px; border-radius: 6px; border: none; font-size: 12px; font-weight: 700; cursor: pointer; color: #050b16; }
@@ -918,6 +1026,22 @@ for (const d of days) {
   }
   .modal-actions { margin-top: 10px; }
   .save-btn { width: 100%; padding: 12px 24px; background: var(--ntv-gradient); color: white; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
+
+  /* Day details modal (time-tracker sessions for one day) */
+  .day-details-content { max-width: 420px; }
+  .day-details-loading, .day-details-empty { font-size: 13px; color: var(--text-secondary); padding: 8px 0; }
+  .day-details-list { list-style: none; display: flex; flex-direction: column; gap: 8px; max-height: 50vh; overflow-y: auto; }
+  .day-details-item {
+    display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; align-items: baseline;
+    background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 10px 12px;
+  }
+  .ddi-desc { font-size: 13px; font-weight: 600; color: var(--text-primary); grid-column: 1 / -1; }
+  .ddi-time { font-size: 11.5px; color: var(--text-secondary); }
+  .ddi-duration { font-size: 11.5px; font-weight: 700; color: var(--ntv-orange); text-align: right; }
+  .day-details-total {
+    margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-subtle);
+    font-size: 13px; font-weight: 700; color: var(--text-primary); text-align: right;
+  }
 
   @media (max-width: 900px) {
     #portal-main { margin-left: 0; padding: 24px 16px; width: 100%; overflow-x: hidden; }
