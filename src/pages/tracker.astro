@@ -4,7 +4,7 @@ import Header from '../components/Header.astro';
 import Sidebar from '../components/Sidebar.astro';
 import { getSession } from '../lib/auth';
 import { parse } from 'cookie';
-import { getManualEntries, addManualEntry, deleteManualEntry, updateManualEntry } from '../lib/entries';
+import { getManualEntries, addManualEntry, deleteManualEntry, updateManualEntry, getActiveTimer } from '../lib/entries';
 import { getClockifyUser, getClockifyDetailedEntries } from '../lib/clockify';
 
 import { getAppSettings } from '../lib/settings';
@@ -135,14 +135,37 @@ if (Astro.request.method === 'POST') {
   }
 }
 
+// Must run before getManualEntries: it can promote an open DTR punch-in out of `entries`.
+const activeTimer = await getActiveTimer(user.id, settings.isEmployee);
 const manualEntries = await getManualEntries(user.id, settings.isEmployee);
 
 const startDateParam = Astro.url.searchParams.get('startDate') || '';
 const endDateParam = Astro.url.searchParams.get('endDate') || '';
 const sourceParam = Astro.url.searchParams.get('source') || 'all';
 
+// The running session only becomes an `entries` row on Time Out, so show it as a live row until then.
+const runningEntries = activeTimer ? (() => {
+  const start = new Date(activeTimer.startTime);
+  const now = new Date();
+  const timeStr = (d: Date) => d.toLocaleTimeString('en-GB', { timeZone: 'Asia/Manila', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  return [{
+    id: 'running',
+    userId: user.id,
+    description: activeTimer.description || 'Present',
+    date: start.toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' }),
+    startTime: timeStr(start),
+    endTime: timeStr(now),
+    durationSeconds: Math.max(0, Math.floor((now.getTime() - start.getTime()) / 1000)),
+    startFull: activeTimer.startTime,
+    endFull: now.toISOString(),
+    documentationUrls: [] as string[],
+    type: 'running' as const,
+  }];
+})() : [];
+
 // Merge manual entries and Clockify entries
 const realEntries = [
+  ...runningEntries,
   ...manualEntries.map(e => ({ ...e, type: 'manual' as const })),
   ...clockifyEntries.map(e => ({ ...e, type: 'clockify' as const }))
 ];
@@ -194,7 +217,7 @@ if (endDateParam) {
   filteredEntries = filteredEntries.filter(e => e.date <= endDateParam);
 }
 if (sourceParam === 'manual') {
-  filteredEntries = filteredEntries.filter(e => e.type === 'manual');
+  filteredEntries = filteredEntries.filter(e => e.type === 'manual' || e.type === 'running');
 } else if (sourceParam === 'clockify') {
   filteredEntries = filteredEntries.filter(e => e.type === 'clockify');
 }
@@ -252,6 +275,7 @@ interface DateGroup {
   dateDisplay: string;
   totalSeconds: number;
   entries: typeof allEntries;
+  hasRunning?: boolean;
 }
 
 interface WeekGroup {
@@ -259,6 +283,7 @@ interface WeekGroup {
   weekDisplay: string;
   totalSeconds: number;
   dateGroups: DateGroup[];
+  hasRunning?: boolean;
 }
 
 interface MonthGroup {
@@ -266,6 +291,7 @@ interface MonthGroup {
   monthName: string;
   totalSeconds: number;
   weekGroups: WeekGroup[];
+  hasRunning?: boolean;
 }
 
 const monthsMap = new Map<string, MonthGroup>();
@@ -330,6 +356,7 @@ for (const entry of paginatedEntries) {
 
   dateGroup.entries.push(entry);
   dateGroup.totalSeconds += entry.durationSeconds;
+  if (entry.type === 'running') monthGroup.hasRunning = weekGroup.hasRunning = dateGroup.hasRunning = true;
 }
 
 const groupedEntries = Array.from(monthsMap.values()).sort((a, b) => b.monthKey.localeCompare(a.monthKey));
@@ -476,7 +503,7 @@ const formatBreakDuration = (minutes: number): string => {
                       <div class="month-header">
                         <span class="month-name">{group.monthName}</span>
                         <div class="month-header-right">
-                          <span class="month-hours">{formatHours(group.totalSeconds / 3600)}</span>
+                          <span class="month-hours" data-live-base={group.hasRunning ? group.totalSeconds : undefined}>{formatHours(group.totalSeconds / 3600)}</span>
                           <button
                             type="button"
                             class="ai-summary-trigger ai-btn-monthly"
@@ -498,7 +525,7 @@ const formatBreakDuration = (minutes: number): string => {
                             <div class="week-header">
                               <span class="week-name">{weekGroup.weekDisplay}</span>
                               <div class="week-header-right">
-                                <span class="week-hours">{formatHours(weekGroup.totalSeconds / 3600)}</span>
+                                <span class="week-hours" data-live-base={weekGroup.hasRunning ? weekGroup.totalSeconds : undefined}>{formatHours(weekGroup.totalSeconds / 3600)}</span>
                                 <button
                                   type="button"
                                   class="ai-summary-trigger ai-btn-weekly"
@@ -520,7 +547,7 @@ const formatBreakDuration = (minutes: number): string => {
                                   <div class="date-group-header">
                                     <span class="date-group-title">{dateGroup.dateDisplay}</span>
                                     <div class="date-group-header-right">
-                                      <span class="date-group-hours">{formatHours(dateGroup.totalSeconds / 3600)}</span>
+                                      <span class="date-group-hours" data-live-base={dateGroup.hasRunning ? dateGroup.totalSeconds : undefined}>{formatHours(dateGroup.totalSeconds / 3600)}</span>
                                       <button
                                         type="button"
                                         class="ai-summary-trigger ai-btn-daily"
@@ -538,7 +565,22 @@ const formatBreakDuration = (minutes: number): string => {
                                   <div class="shift-list">
                                     {dateGroup.entries.map((entry, entryIdx) => (
                                       <>
-                                      {entry.type === 'attendance' ? (
+                                      {entry.type === 'running' ? (
+                                        <div class="shift-item running-item">
+                                          <div class="shift-info">
+                                            <div class="shift-title-row">
+                                              <span class="shift-title">{entry.description}</span>
+                                              <span class="source-badge running"><span class="running-dot"></span>Running</span>
+                                            </div>
+                                            <div class="shift-sub">
+                                              <span class="time">{formatTo24hr(entry.startTime)} — now</span>
+                                            </div>
+                                          </div>
+                                          <div class="shift-actions">
+                                            <span class="shift-hours" data-live-base={entry.durationSeconds}>{formatHours(entry.durationSeconds / 3600)}</span>
+                                          </div>
+                                        </div>
+                                      ) : entry.type === 'attendance' ? (
                                         <div class={`shift-item attendance-marker-item ${entry.isActionable ? 'actionable' : 'informational'}`}>
                                           <div class="shift-info">
                                             <div class="shift-title-row">
@@ -667,7 +709,7 @@ const formatBreakDuration = (minutes: number): string => {
                 <div class="stats-box">
                   <div class="stat-item">
                     <span class="field-label">TOTAL RENDERED</span>
-                    <div class="stat-value">{formatHours(totalSeconds / 3600)}</div>
+                    <div class="stat-value" data-live-base={filteredEntries.some(e => e.type === 'running') ? totalSeconds : undefined}>{formatHours(totalSeconds / 3600)}</div>
                   </div>
                 </div>
 
@@ -941,6 +983,21 @@ const formatBreakDuration = (minutes: number): string => {
 
 <script is:inline>
   const params = new URLSearchParams(window.location.search);
+
+  // Totals that include the running session were computed at render time; keep them ticking.
+  const liveEls = document.querySelectorAll('[data-live-base]');
+  if (liveEls.length) {
+    const loadedAt = Date.now();
+    const pad = (n) => String(n).padStart(2, '0');
+    const tick = () => {
+      const elapsed = Math.floor((Date.now() - loadedAt) / 1000);
+      liveEls.forEach((el) => {
+        const s = Number(el.dataset.liveBase) + elapsed;
+        el.textContent = `${pad(Math.floor(s / 3600))}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`;
+      });
+    };
+    setInterval(tick, 1000);
+  }
 
   // Attendance Chart entries with no time log: clicking "Log time" jumps to the Manual
   // Adjustment form pre-filled with that date so the user can log the actual hours worked.
@@ -2955,6 +3012,18 @@ const formatBreakDuration = (minutes: number): string => {
     color: var(--ntv-orange);
     border: 1px solid rgba(237, 102, 33, 0.2);
   }
+  .source-badge.running {
+    display: inline-flex; align-items: center; gap: 5px;
+    background: rgba(34, 197, 94, 0.1);
+    color: var(--att-present);
+    border: 1px solid rgba(34, 197, 94, 0.25);
+  }
+  .running-dot {
+    width: 6px; height: 6px; border-radius: 50%; background: var(--att-present);
+    animation: running-pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes running-pulse { 50% { opacity: 0.3; } }
+  .running-item { background: rgba(34, 197, 94, 0.03); }
   .sync-lock-icon {
     color: rgba(255, 255, 255, 0.35);
   }

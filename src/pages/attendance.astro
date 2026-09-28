@@ -426,16 +426,18 @@ for (const d of days) {
   // followed by the next one.
   const logsHtml = (data) => {
     if (!data.items.length) return '<div class="day-details-empty">No time logged for this day.</div>';
+    const mixedSources = data.items.some((i) => i.source === "clockify");
     const rows = data.items.map((item, idx) => {
+      const badge = mixedSources ? `<span class="log-source-badge ${item.source}">${item.source === "clockify" ? "Clockify" : "Manual"}</span>` : "";
       const entry = `
-        <li class="log-entry source-${item.source}">
-          <div class="log-entry-body">
-            <div class="log-entry-top">
-              <span class="log-entry-desc">${escapeHtml(item.description)}</span>
-              <span class="log-entry-duration">${formatDuration(item.durationSeconds)}</span>
+        <li class="log-entry">
+          <div class="log-entry-info">
+            <div class="log-entry-title-row">
+              <span class="log-entry-desc">${escapeHtml(item.description)}</span>${badge}
             </div>
-            <span class="log-entry-time">${formatClock(item.startTime)} – ${formatClock(item.endTime)}</span>
+            <span class="log-entry-time">${formatClock(item.startTime)} — ${formatClock(item.endTime)}</span>
           </div>
+          <span class="log-entry-duration">${formatDuration(item.durationSeconds)}</span>
         </li>
       `;
       const next = data.items[idx + 1];
@@ -451,8 +453,10 @@ for (const d of days) {
       `;
     }).join("");
     return `
-      <ul class="day-logs-list">${rows}</ul>
-      <div class="day-logs-total"><span>Total logged</span><span>${formatDuration(data.totalSeconds)}</span></div>
+      <div class="day-logs-card">
+        <ul class="day-logs-list">${rows}</ul>
+        <div class="day-logs-total"><span>Total logged</span><span>${formatDuration(data.totalSeconds)}</span></div>
+      </div>
     `;
   };
 
@@ -577,7 +581,7 @@ for (const d of days) {
       });
 
       const niceDate = new Date(`${cell.dataset.date}T00:00:00`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
-      popoverDate.innerHTML = `<span class="popover-date-text">${niceDate}</span><span class="popover-status-pill status-${cell.dataset.status}">${statusLabel(cell.dataset.status)}</span>`;
+      popoverDate.innerHTML = `<span class="popover-date-text">${niceDate}</span><span class="popover-status-badge status-${cell.dataset.status}">${statusLabel(cell.dataset.status)}</span>`;
       // A day with real logged sessions already speaks for itself — editing its status would just
       // contradict the actual record, so the status controls only show up for days with no logs.
       popoverEditSection.classList.add("hidden");
@@ -957,7 +961,7 @@ for (const d of days) {
   /* Status popover */
   .status-popover {
     position: fixed; z-index: 3000; background: var(--modal-bg); border: 1px solid var(--border-subtle);
-    border-radius: 14px; padding: 16px; width: min(300px, calc(100vw - 24px)); box-shadow: 0 16px 40px rgba(0,0,0,0.45);
+    border-radius: 12px; padding: 0; width: min(300px, calc(100vw - 24px)); box-shadow: 0 12px 32px rgba(0,0,0,0.4);
     max-height: calc(100vh - 24px); overflow-y: auto;
   }
   .status-popover.hidden { display: none; }
@@ -983,28 +987,30 @@ for (const d of days) {
   }
   .popover-header {
     display: flex; align-items: center; justify-content: space-between; gap: 8px;
-    margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border-subtle);
+    padding: 12px 16px; background: rgba(255, 255, 255, 0.02); border-bottom: 1px solid var(--border-subtle);
   }
   .popover-date { display: flex; align-items: center; gap: 8px; }
   .popover-date-text { font-size: 13px; font-weight: 700; color: var(--text-primary); }
-  .popover-status-pill {
-    font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em;
-    padding: 3px 8px; border-radius: 20px; color: #050b16; background: var(--text-secondary);
+  .popover-status-badge {
+    font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: .03em;
+    padding: 2px 8px; border-radius: 5px; color: var(--text-secondary);
+    background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.12);
   }
-  .popover-status-pill.status-present { background: var(--att-present); }
-  .popover-status-pill.status-absent { background: var(--att-absent); color: #fff; }
-  .popover-status-pill.status-wfh { background: var(--att-wfh); }
-  .popover-status-pill.status-sl { background: var(--att-sl); }
-  .popover-status-pill.status-vl { background: var(--att-vl); color: #fff; }
-  .popover-status-pill.status-unmarked, .popover-status-pill.status-non-working { background: rgba(255,255,255,0.12); color: var(--text-secondary); }
+  .popover-status-badge.status-present { border-color: rgba(34, 197, 94, 0.4); color: var(--att-present); }
+  .popover-status-badge.status-absent { border-color: rgba(225, 29, 72, 0.4); color: var(--att-absent); }
+  .popover-status-badge.status-wfh { border-color: rgba(250, 204, 21, 0.4); color: var(--att-wfh); }
+  .popover-status-badge.status-sl { border-color: rgba(245, 158, 11, 0.4); color: var(--att-sl); }
+  .popover-status-badge.status-vl { border-color: rgba(139, 92, 246, 0.4); color: var(--att-vl); }
   .popover-dismiss-btn {
     flex-shrink: 0; background: none; border: none; color: var(--text-secondary); cursor: pointer;
     padding: 2px; border-radius: 4px; display: flex; line-height: 0; transition: color 0.15s;
   }
   .popover-dismiss-btn:hover { color: var(--text-primary); }
-  .popover-logs { margin-bottom: 12px; }
   .popover-logs:empty { display: none; }
-  .popover-logs .day-logs-list { max-height: 160px; }
+  .popover-logs .day-logs-card { border: none; border-radius: 0; background: none; }
+  .popover-logs .day-logs-list { max-height: 240px; }
+  .popover-logs .day-details-loading, .popover-logs .day-details-empty { margin: 12px 16px 0; }
+  #popover-edit-section { padding: 14px 16px 16px; }
   #popover-edit-section.hidden { display: none; }
   .popover-buttons-label { font-size: 11px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; }
   .popover-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 10px; }
@@ -1095,53 +1101,53 @@ for (const d of days) {
     background: rgba(255,255,255,0.02); border: 1px dashed var(--border-subtle); border-radius: 10px;
   }
 
-  /* Shared session-list look — used both inside the status popover and the read-only modal.
-     A colored left bar tells manual entries (orange, matches the site accent) from synced
-     Clockify sessions (green, matches the DTR page's "Clockify Synced" indicator) apart. */
-  .day-logs-list { list-style: none; display: flex; flex-direction: column; gap: 8px; max-height: 50vh; overflow-y: auto; padding-right: 2px; }
+  /* Shared session list for the popover and the read-only modal — mirrors the Time Tracker's
+     date-group card: one card, hairline-separated rows, mono times, orange mono hours. */
+  .day-logs-card {
+    background: rgba(5, 11, 22, 0.6); border: 1px solid var(--border-subtle);
+    border-radius: 12px; overflow: hidden;
+  }
+  .day-logs-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; max-height: 50vh; overflow-y: auto; }
   .log-entry {
-    position: relative; overflow: hidden; padding: 10px 12px 10px 16px;
-    background: linear-gradient(135deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
-    border: 1px solid var(--border-subtle); border-radius: 10px;
-    transition: border-color 0.15s, background 0.15s;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px;
+    padding: 12px 16px; border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    transition: background-color 0.15s;
   }
-  .log-entry:hover { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.16); }
-  .log-entry::before {
-    content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--ntv-orange);
-    box-shadow: 0 0 8px rgba(237, 102, 33, 0.5);
-  }
-  .log-entry.source-clockify::before { background: #34d399; box-shadow: 0 0 8px rgba(52, 211, 153, 0.5); }
-  .log-entry-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+  .log-entry:hover { background: rgba(237, 102, 33, 0.03); }
+  .day-logs-list > li:last-child { border-bottom: none; }
+  .log-entry-info { min-width: 0; }
+  .log-entry-title-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
   .log-entry-desc {
-    font-size: 13px; font-weight: 700; color: var(--text-primary);
+    font-size: 13px; font-weight: 600; color: var(--text-primary);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
+  .log-entry-time { display: block; font-size: 11px; color: var(--text-secondary); font-family: 'JetBrains Mono', monospace; }
   .log-entry-duration {
-    flex-shrink: 0; font-size: 10.5px; font-weight: 800; color: var(--ntv-orange);
-    background: rgba(237, 102, 33, 0.14); border: 1px solid rgba(237, 102, 33, 0.25);
-    padding: 3px 9px; border-radius: 20px;
+    flex-shrink: 0; font-size: 14px; font-weight: 700; color: var(--ntv-orange);
+    font-family: 'JetBrains Mono', monospace;
   }
-  .log-entry.source-clockify .log-entry-duration { color: #34d399; background: rgba(52, 211, 153, 0.14); border-color: rgba(52, 211, 153, 0.25); }
-  .log-entry-time { display: block; margin-top: 4px; font-size: 11px; color: var(--text-secondary); }
+  .log-source-badge {
+    flex-shrink: 0; font-size: 9px; font-weight: 800; padding: 2px 6px; border-radius: 4px;
+    text-transform: uppercase; letter-spacing: 0.02em;
+  }
+  .log-source-badge.clockify { background: rgba(96, 165, 250, 0.1); color: #60a5fa; border: 1px solid rgba(96, 165, 250, 0.2); }
+  .log-source-badge.manual { background: rgba(237, 102, 33, 0.1); color: var(--ntv-orange); border: 1px solid rgba(237, 102, 33, 0.2); }
 
-  /* Same gap-between-sessions divider as the Time Tracker tab. */
-  .log-break-divider { display: flex; align-items: center; gap: 8px; padding: 2px 2px; }
+  .log-break-divider { display: flex; align-items: center; gap: 10px; padding: 4px 16px; }
   .log-break-line {
     flex: 1; height: 1px;
-    background: repeating-linear-gradient(90deg, rgba(255,255,255,0.14) 0, rgba(255,255,255,0.14) 4px, transparent 4px, transparent 8px);
+    background: repeating-linear-gradient(90deg, rgba(255,255,255,0.12) 0, rgba(255,255,255,0.12) 4px, transparent 4px, transparent 8px);
   }
   .log-break-label {
-    font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em;
-    color: var(--text-secondary); white-space: nowrap;
-    background: rgba(255,255,255,0.06); padding: 3px 8px; border-radius: 20px;
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--text-secondary); opacity: 0.7; white-space: nowrap;
   }
   .day-logs-total {
-    margin-top: 14px; padding: 10px 12px; border-radius: 10px;
-    background: rgba(237, 102, 33, 0.08); border: 1px solid rgba(237, 102, 33, 0.2);
     display: flex; justify-content: space-between; align-items: center;
+    padding: 12px 16px; background: rgba(255, 255, 255, 0.02); border-top: 1px solid var(--border-subtle);
   }
-  .day-logs-total span:first-child { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-secondary); }
-  .day-logs-total span:last-child { font-size: 16px; font-weight: 800; color: var(--ntv-orange); }
+  .day-logs-total span:first-child { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-secondary); }
+  .day-logs-total span:last-child { font-size: 14px; font-weight: 700; color: var(--ntv-orange); font-family: 'JetBrains Mono', monospace; }
 
   @media (max-width: 900px) {
     #portal-main { margin-left: 0; padding: 24px 16px; width: 100%; overflow-x: hidden; }
@@ -1170,7 +1176,7 @@ for (const d of days) {
       bottom: 4px; left: 4px;
     }
 
-    .status-popover { padding: 12px; }
+    #popover-edit-section { padding: 12px; }
     .status-btn { padding: 10px 8px; font-size: 12px; }
     .popover-clear-btn, .popover-close-btn { padding: 10px; }
 

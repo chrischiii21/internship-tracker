@@ -90,15 +90,30 @@ const isoWeekdayOf = (dateStr: string) => {
 const shortDate = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
 
 const mondayThisWeekStr = manilaDayOffset(-(isoWeekdayOf(todayManila) - 1)).toISOString().split('T')[0];
-const monthStartStr = `${todayManila.slice(0, 7)}-01`;
+
+// Weekly Activity can browse back to past months via ?wm=YYYY-MM, bounded by start date and today.
+const currentMonthKey = todayManila.slice(0, 7);
+const startMonthKey = (activeStartDate || todayManila).slice(0, 7);
+const firstMonthKey = startMonthKey < currentMonthKey ? startMonthKey : currentMonthKey;
+const wmParam = Astro.url.searchParams.get('wm') || '';
+const selectedMonthKey = /^\d{4}-\d{2}$/.test(wmParam) && wmParam >= firstMonthKey && wmParam <= currentMonthKey ? wmParam : currentMonthKey;
+const shiftMonthKey = (key: string, n: number) => {
+  const [y, m] = key.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1 + n, 1)).toISOString().slice(0, 7);
+};
+const prevMonthKey = selectedMonthKey > firstMonthKey ? shiftMonthKey(selectedMonthKey, -1) : null;
+const nextMonthKey = selectedMonthKey < currentMonthKey ? shiftMonthKey(selectedMonthKey, 1) : null;
+const selectedMonthLabel = new Date(`${selectedMonthKey}-01T00:00:00Z`).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+
+const monthStartStr = `${selectedMonthKey}-01`;
 const mondayOfMonthStart = (() => {
   const d = new Date(`${monthStartStr}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() - (isoWeekdayOf(monthStartStr) - 1));
   return d;
 })();
-const [todayYearNum, todayMonthNum] = todayManila.split('-').map(Number);
-const daysInMonth = new Date(Date.UTC(todayYearNum, todayMonthNum, 0)).getUTCDate();
-const monthEndStr = `${todayManila.slice(0, 7)}-${String(daysInMonth).padStart(2, '0')}`;
+const [selectedYearNum, selectedMonthNum] = selectedMonthKey.split('-').map(Number);
+const daysInMonth = new Date(Date.UTC(selectedYearNum, selectedMonthNum, 0)).getUTCDate();
+const monthEndStr = `${selectedMonthKey}-${String(daysInMonth).padStart(2, '0')}`;
 const mondayOfMonthEnd = (() => {
   const d = new Date(`${monthEndStr}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() - (isoWeekdayOf(monthEndStr) - 1));
@@ -180,6 +195,9 @@ const avgHoursPerDayOverall = renderedHours / daysSinceStart;
 const currentMonthPrefix = todayManila.slice(0, 7);
 const hoursThisMonth = Object.entries(dailyHoursMap)
   .filter(([d]) => d.startsWith(currentMonthPrefix))
+  .reduce((sum, [, h]) => sum + h, 0);
+const hoursSelectedMonth = Object.entries(dailyHoursMap)
+  .filter(([d]) => d.startsWith(selectedMonthKey))
   .reduce((sum, [, h]) => sum + h, 0);
 
 // Hours per week from program start to today — the total logged inside each week, not a running
@@ -816,10 +834,20 @@ if (!settings.isEmployee) {
         </div>
 
         <div class="full-grid">
-          <section class="weekly-chart-card">
+          <section class="weekly-chart-card" id="weekly-activity">
             <div class="section-header">
               <h2>Weekly <span class="accent">Activity</span></h2>
-              <span class="chart-total">{formatHours(hoursThisMonth)} this month</span>
+              <span class="chart-total">{formatHours(hoursSelectedMonth)} {selectedMonthKey === currentMonthKey ? 'this month' : 'total'}</span>
+            </div>
+            <div class="week-month-nav">
+              {prevMonthKey
+                ? <a class="week-month-btn" href={`?wm=${prevMonthKey}#weekly-activity`} aria-label="Previous month"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg></a>
+                : <span class="week-month-btn disabled" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg></span>}
+              <span class="week-month-label">{selectedMonthLabel}</span>
+              {nextMonthKey
+                ? <a class="week-month-btn" href={`?wm=${nextMonthKey}#weekly-activity`} aria-label="Next month"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg></a>
+                : <span class="week-month-btn disabled" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg></span>}
+              {selectedMonthKey !== currentMonthKey && <a class="week-month-today" href="/dashboard#weekly-activity">This month</a>}
             </div>
             <div class="week-rows">
               {monthWeeksData.map(w => (
@@ -938,7 +966,7 @@ if (!settings.isEmployee) {
     {
       target: '.weekly-chart-card',
       title: 'Weekly activity',
-      body: 'Hours grouped by week for the current month, so a light week is obvious before it becomes a problem.',
+      body: 'Hours grouped by week, starting on the current month — use the arrows to look back at earlier months. A light week is obvious before it becomes a problem.',
     },
     {
       target: '.progress-chart-card',
@@ -1524,6 +1552,17 @@ if (!settings.isEmployee) {
 
   .weekly-chart-card { background: var(--card-bg); border: 1px solid var(--border-subtle); border-radius: 24px; padding: 24px; }
   .chart-total { font-size: 12px; font-weight: 700; color: var(--text-secondary); }
+  .week-month-nav { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+  .week-month-btn {
+    display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px;
+    border-radius: 8px; border: 1px solid var(--border-subtle); background: rgba(127,127,127,.05);
+    color: var(--text-primary); transition: border-color .15s, color .15s;
+  }
+  a.week-month-btn:hover { border-color: rgba(237,102,33,.4); color: var(--ntv-orange); }
+  .week-month-btn.disabled { opacity: .3; }
+  .week-month-label { font-size: 13px; font-weight: 700; color: var(--text-primary); min-width: 120px; text-align: center; }
+  .week-month-today { margin-left: auto; font-size: 11px; font-weight: 700; color: var(--ntv-orange); text-decoration: none; }
+  .week-month-today:hover { text-decoration: underline; }
   /* Horizontal week rows: each names the dates it covers, so "which days is this?" never comes up. */
   .week-rows { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
   .week-row { display: grid; grid-template-columns: 120px 1fr auto; align-items: center; gap: 14px; }
