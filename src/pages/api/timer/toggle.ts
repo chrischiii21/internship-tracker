@@ -28,11 +28,19 @@ export const POST: APIRoute = async ({ request }) => {
       });
     }
 
+    // The header's punch modal sends the wall-clock time the user read off their company's
+    // attendance reader, so the entry matches that record instead of whenever they got around
+    // to opening this app. Absent or malformed, the punch falls back to "now".
+    const body = await request.json().catch(() => ({} as any));
+    const punchTime = typeof body?.time === 'string' && /^\d{2}:\d{2}$/.test(body.time)
+      ? body.time
+      : undefined;
+
     const isEmployee = settings.isEmployee ?? false;
     const existing = await getActiveTimer(session.id, isEmployee);
 
     if (existing) {
-      const result = await stopTimer(session.id, '', isEmployee);
+      const result = await stopTimer(session.id, '', isEmployee, punchTime);
       const hours = (result.durationSeconds / 3600).toFixed(2);
       const { addSyncLog } = await import('../../../lib/logs');
       await addSyncLog({
@@ -41,7 +49,7 @@ export const POST: APIRoute = async ({ request }) => {
         status: result.capped ? 'Warning' : 'Success',
         details: result.capped
           ? `Timed out — timer had been left running since ${new Date(result.startTime).toLocaleString('en-US', { timeZone: 'Asia/Manila' })}; saved one shift (${hours}h) instead of the full gap`
-          : 'Timed out',
+          : (punchTime ? `Timed out at ${punchTime} (matched to attendance tap)` : 'Timed out'),
       });
       return new Response(JSON.stringify({
         success: true,
@@ -55,9 +63,14 @@ export const POST: APIRoute = async ({ request }) => {
         headers: { 'Content-Type': 'application/json' },
       });
     } else {
-      const started = await startTimer(session.id, '', isEmployee);
+      const started = await startTimer(session.id, '', isEmployee, punchTime);
       const { addSyncLog } = await import('../../../lib/logs');
-      await addSyncLog({ userId: session.id, type: 'Sync', status: 'Success', details: 'Timed in' });
+      await addSyncLog({
+        userId: session.id,
+        type: 'Sync',
+        status: 'Success',
+        details: punchTime ? `Timed in at ${punchTime} (matched to attendance tap)` : 'Timed in',
+      });
       return new Response(JSON.stringify({ success: true, active: true, startTime: started?.start_time ?? null }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
