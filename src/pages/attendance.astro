@@ -271,7 +271,7 @@ for (const d of days) {
   {isEditable && (
     <div id="status-popover" class="status-popover hidden">
       <div class="popover-date" id="popover-date"></div>
-      <button type="button" id="popover-view-logs" class="popover-view-logs-btn">View time logs for this day</button>
+      <div id="popover-logs" class="popover-logs"></div>
       <label class="range-toggle">
         <input type="checkbox" id="popover-range-toggle" />
         Apply to a date range
@@ -369,7 +369,7 @@ for (const d of days) {
   </div>
 </Layout>
 
-<script define:vars={{ isEditable, todayStr }}>
+<script define:vars={{ isEditable }}>
   const secSel = document.getElementById("section-selector");
   const sSel = document.getElementById("student-selector");
   const modeSel = document.getElementById("mode-selector");
@@ -390,12 +390,8 @@ for (const d of days) {
   mSel?.addEventListener("change", update);
   ySel?.addEventListener("change", update);
 
-  // Day details modal — lists that day's actual time-tracker sessions (manual + Clockify).
-  // Shared by both the read-only coordinator view (click a day directly) and the editable
-  // view (a link inside the status popover, so it doesn't compete with the status-editing click).
-  const detailsModal = document.getElementById("day-details-modal");
-  const detailsTitle = document.getElementById("day-details-title");
-  const detailsBody = document.getElementById("day-details-body");
+  // That day's actual time-tracker sessions (manual + Clockify) — shown automatically, no extra
+  // click: as a modal for the read-only coordinator view, inline in the popover for the editable one.
   const pageParams = new URLSearchParams(window.location.search);
 
   const formatClock = (t) => {
@@ -413,15 +409,25 @@ for (const d of days) {
   };
   const escapeHtml = (s) => (s || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-  const closeDayDetails = () => detailsModal?.classList.remove("active");
-  document.getElementById("day-details-close")?.addEventListener("click", closeDayDetails);
-  detailsModal?.addEventListener("click", (e) => { if (e.target === detailsModal) closeDayDetails(); });
+  const logsHtml = (data) => {
+    if (!data.items.length) return '<div class="day-details-empty">No time logged for this day.</div>';
+    const rows = data.items.map((item) => `
+      <li class="day-details-item">
+        <span class="ddi-desc">${escapeHtml(item.description)}</span>
+        <span class="ddi-time">${formatClock(item.startTime)} – ${formatClock(item.endTime)}</span>
+        <span class="ddi-duration">${formatDuration(item.durationSeconds)}</span>
+      </li>
+    `).join("");
+    return `<ul class="day-details-list">${rows}</ul><div class="day-details-total">Total: ${formatDuration(data.totalSeconds)}</div>`;
+  };
 
-  async function openDayDetails(date) {
-    if (!date || date > todayStr) return;
-    detailsModal.classList.add("active");
-    detailsTitle.textContent = new Date(`${date}T00:00:00`).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
-    detailsBody.innerHTML = '<div class="day-details-loading">Loading…</div>';
+  // Fetches and renders `date`'s logs into `container`, tagging each request so a slow one that
+  // resolves after the user has already moved to another day doesn't overwrite what's shown now.
+  let logsRequestToken = 0;
+  async function loadLogsInto(container, date) {
+    if (!container) return;
+    const myToken = ++logsRequestToken;
+    container.innerHTML = '<div class="day-details-loading">Loading…</div>';
 
     const url = new URL("/api/attendance/day-entries", window.location.origin);
     url.searchParams.set("date", date);
@@ -432,34 +438,29 @@ for (const d of days) {
       const res = await fetch(url);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to load time logs");
-
-      if (!data.items.length) {
-        detailsBody.innerHTML = '<div class="day-details-empty">No time logged for this day.</div>';
-        return;
-      }
-
-      const rows = data.items.map((item) => `
-        <li class="day-details-item">
-          <span class="ddi-desc">${escapeHtml(item.description)}</span>
-          <span class="ddi-time">${formatClock(item.startTime)} – ${formatClock(item.endTime)}</span>
-          <span class="ddi-duration">${formatDuration(item.durationSeconds)}</span>
-        </li>
-      `).join("");
-
-      detailsBody.innerHTML = `
-        <ul class="day-details-list">${rows}</ul>
-        <div class="day-details-total">Total: ${formatDuration(data.totalSeconds)}</div>
-      `;
+      if (logsRequestToken === myToken) container.innerHTML = logsHtml(data);
     } catch (err) {
-      detailsBody.innerHTML = `<div class="day-details-empty">${err.message || "Error loading time logs"}</div>`;
+      if (logsRequestToken === myToken) {
+        container.innerHTML = `<div class="day-details-empty">${err.message || "Error loading time logs"}</div>`;
+      }
     }
   }
 
   if (!isEditable) {
+    const detailsModal = document.getElementById("day-details-modal");
+    const detailsTitle = document.getElementById("day-details-title");
+    const detailsBody = document.getElementById("day-details-body");
+
+    const closeDayDetails = () => detailsModal?.classList.remove("active");
+    document.getElementById("day-details-close")?.addEventListener("click", closeDayDetails);
+    detailsModal?.addEventListener("click", (e) => { if (e.target === detailsModal) closeDayDetails(); });
+
     document.getElementById("calendar-grid")?.addEventListener("click", (e) => {
       const cell = e.target.closest(".day-cell.viewable");
       if (!cell) return;
-      openDayDetails(cell.dataset.date);
+      detailsModal.classList.add("active");
+      detailsTitle.textContent = new Date(`${cell.dataset.date}T00:00:00`).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+      loadLogsInto(detailsBody, cell.dataset.date);
     });
   } else {
     const popover = document.getElementById("status-popover");
@@ -469,7 +470,7 @@ for (const d of days) {
     const rangeFields = document.getElementById("popover-range-fields");
     const endDateInput = document.getElementById("popover-end-date");
     const reasonInput = document.getElementById("popover-reason");
-    const viewLogsBtn = document.getElementById("popover-view-logs");
+    const popoverLogs = document.getElementById("popover-logs");
     let activeCell = null;
     // Bumped every time a save starts; a completing request only releases the popover's shared
     // busy state if it's still the most recent one — otherwise a slow, stale request finishing
@@ -536,7 +537,7 @@ for (const d of days) {
       });
 
       popoverDate.textContent = `${cell.dataset.date} — currently ${statusLabel(cell.dataset.status)}`;
-      if (viewLogsBtn) viewLogsBtn.style.display = cell.dataset.date <= todayStr ? '' : 'none';
+      loadLogsInto(popoverLogs, cell.dataset.date);
       halfDayCheckbox.checked = cell.dataset.half === '1';
 
       reasonInput.value = cell.dataset.reason || '';
@@ -558,12 +559,6 @@ for (const d of days) {
     });
 
     document.getElementById("popover-close")?.addEventListener("click", closePopover);
-    viewLogsBtn?.addEventListener("click", () => {
-      if (!activeCell) return;
-      const date = activeCell.dataset.date;
-      closePopover();
-      openDayDetails(date);
-    });
     document.addEventListener("click", (e) => {
       if (!activeCell) return;
       if (popover.contains(e.target) || e.target.closest(".day-cell")) return;
@@ -940,11 +935,18 @@ for (const d of days) {
     opacity: 0.6; cursor: not-allowed;
   }
   .popover-date { font-size: 11px; color: var(--text-secondary); margin-bottom: 10px; }
-  .popover-view-logs-btn {
-    display: block; width: 100%; text-align: left; margin-bottom: 10px; padding: 0;
-    background: none; border: none; color: var(--ntv-orange); font-size: 11.5px; font-weight: 600;
-    cursor: pointer; text-decoration: underline;
+  .popover-logs { margin-bottom: 10px; }
+  .popover-logs:empty { display: none; }
+  .popover-logs .day-details-loading, .popover-logs .day-details-empty { font-size: 11px; color: var(--text-secondary); }
+  .popover-logs .day-details-list { list-style: none; display: flex; flex-direction: column; gap: 6px; max-height: 140px; overflow-y: auto; }
+  .popover-logs .day-details-item {
+    display: grid; grid-template-columns: 1fr auto; gap: 1px 8px; align-items: baseline;
+    background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 6px 8px;
   }
+  .popover-logs .ddi-desc { font-size: 11px; font-weight: 600; color: var(--text-primary); grid-column: 1 / -1; }
+  .popover-logs .ddi-time { font-size: 10px; color: var(--text-secondary); }
+  .popover-logs .ddi-duration { font-size: 10px; font-weight: 700; color: var(--ntv-orange); text-align: right; }
+  .popover-logs .day-details-total { margin-top: 6px; font-size: 11px; font-weight: 700; color: var(--text-primary); text-align: right; }
   .popover-buttons-label { font-size: 11px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; }
   .popover-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 10px; }
   .status-btn { padding: 8px; border-radius: 6px; border: none; font-size: 12px; font-weight: 700; cursor: pointer; color: #050b16; }
