@@ -576,7 +576,8 @@ for (const d of days) {
         }
       });
 
-      popoverDate.textContent = `${cell.dataset.date} — currently ${statusLabel(cell.dataset.status)}`;
+      const niceDate = new Date(`${cell.dataset.date}T00:00:00`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+      popoverDate.innerHTML = `<span class="popover-date-text">${niceDate}</span><span class="popover-status-pill status-${cell.dataset.status}">${statusLabel(cell.dataset.status)}</span>`;
       // A day with real logged sessions already speaks for itself — editing its status would just
       // contradict the actual record, so the status controls only show up for days with no logs.
       popoverEditSection.classList.add("hidden");
@@ -956,7 +957,7 @@ for (const d of days) {
   /* Status popover */
   .status-popover {
     position: fixed; z-index: 3000; background: var(--modal-bg); border: 1px solid var(--border-subtle);
-    border-radius: 12px; padding: 14px; width: min(260px, calc(100vw - 24px)); box-shadow: 0 12px 32px rgba(0,0,0,0.4);
+    border-radius: 14px; padding: 16px; width: min(300px, calc(100vw - 24px)); box-shadow: 0 16px 40px rgba(0,0,0,0.45);
     max-height: calc(100vh - 24px); overflow-y: auto;
   }
   .status-popover.hidden { display: none; }
@@ -980,8 +981,22 @@ for (const d of days) {
   .holiday-row button:disabled:not(.is-loading) {
     opacity: 0.6; cursor: not-allowed;
   }
-  .popover-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
-  .popover-date { font-size: 11px; color: var(--text-secondary); }
+  .popover-header {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border-subtle);
+  }
+  .popover-date { display: flex; align-items: center; gap: 8px; }
+  .popover-date-text { font-size: 13px; font-weight: 700; color: var(--text-primary); }
+  .popover-status-pill {
+    font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em;
+    padding: 3px 8px; border-radius: 20px; color: #050b16; background: var(--text-secondary);
+  }
+  .popover-status-pill.status-present { background: var(--att-present); }
+  .popover-status-pill.status-absent { background: var(--att-absent); color: #fff; }
+  .popover-status-pill.status-wfh { background: var(--att-wfh); }
+  .popover-status-pill.status-sl { background: var(--att-sl); }
+  .popover-status-pill.status-vl { background: var(--att-vl); color: #fff; }
+  .popover-status-pill.status-unmarked, .popover-status-pill.status-non-working { background: rgba(255,255,255,0.12); color: var(--text-secondary); }
   .popover-dismiss-btn {
     flex-shrink: 0; background: none; border: none; color: var(--text-secondary); cursor: pointer;
     padding: 2px; border-radius: 4px; display: flex; line-height: 0; transition: color 0.15s;
@@ -1085,41 +1100,48 @@ for (const d of days) {
      Clockify sessions (green, matches the DTR page's "Clockify Synced" indicator) apart. */
   .day-logs-list { list-style: none; display: flex; flex-direction: column; gap: 8px; max-height: 50vh; overflow-y: auto; padding-right: 2px; }
   .log-entry {
-    position: relative; overflow: hidden; padding: 9px 12px 9px 14px;
-    background: rgba(255,255,255,0.04); border: 1px solid var(--border-subtle); border-radius: 10px;
+    position: relative; overflow: hidden; padding: 10px 12px 10px 16px;
+    background: linear-gradient(135deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
+    border: 1px solid var(--border-subtle); border-radius: 10px;
+    transition: border-color 0.15s, background 0.15s;
   }
+  .log-entry:hover { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.16); }
   .log-entry::before {
-    content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--ntv-orange);
+    content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--ntv-orange);
+    box-shadow: 0 0 8px rgba(237, 102, 33, 0.5);
   }
-  .log-entry.source-clockify::before { background: #34d399; }
+  .log-entry.source-clockify::before { background: #34d399; box-shadow: 0 0 8px rgba(52, 211, 153, 0.5); }
   .log-entry-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
   .log-entry-desc {
-    font-size: 12.5px; font-weight: 700; color: var(--text-primary);
+    font-size: 13px; font-weight: 700; color: var(--text-primary);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .log-entry-duration {
     flex-shrink: 0; font-size: 10.5px; font-weight: 800; color: var(--ntv-orange);
-    background: rgba(237, 102, 33, 0.12); padding: 2px 8px; border-radius: 20px;
+    background: rgba(237, 102, 33, 0.14); border: 1px solid rgba(237, 102, 33, 0.25);
+    padding: 3px 9px; border-radius: 20px;
   }
-  .log-entry.source-clockify .log-entry-duration { color: #34d399; background: rgba(52, 211, 153, 0.12); }
-  .log-entry-time { display: block; margin-top: 3px; font-size: 11px; color: var(--text-secondary); }
+  .log-entry.source-clockify .log-entry-duration { color: #34d399; background: rgba(52, 211, 153, 0.14); border-color: rgba(52, 211, 153, 0.25); }
+  .log-entry-time { display: block; margin-top: 4px; font-size: 11px; color: var(--text-secondary); }
 
   /* Same gap-between-sessions divider as the Time Tracker tab. */
-  .log-break-divider { display: flex; align-items: center; gap: 8px; padding: 0 2px; }
+  .log-break-divider { display: flex; align-items: center; gap: 8px; padding: 2px 2px; }
   .log-break-line {
     flex: 1; height: 1px;
-    background: repeating-linear-gradient(90deg, rgba(255,255,255,0.12) 0, rgba(255,255,255,0.12) 4px, transparent 4px, transparent 8px);
+    background: repeating-linear-gradient(90deg, rgba(255,255,255,0.14) 0, rgba(255,255,255,0.14) 4px, transparent 4px, transparent 8px);
   }
   .log-break-label {
-    font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
-    color: var(--text-secondary); opacity: 0.7; white-space: nowrap;
+    font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--text-secondary); white-space: nowrap;
+    background: rgba(255,255,255,0.06); padding: 3px 8px; border-radius: 20px;
   }
   .day-logs-total {
-    margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-subtle);
+    margin-top: 14px; padding: 10px 12px; border-radius: 10px;
+    background: rgba(237, 102, 33, 0.08); border: 1px solid rgba(237, 102, 33, 0.2);
     display: flex; justify-content: space-between; align-items: center;
   }
   .day-logs-total span:first-child { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-secondary); }
-  .day-logs-total span:last-child { font-size: 15px; font-weight: 800; color: var(--text-primary); }
+  .day-logs-total span:last-child { font-size: 16px; font-weight: 800; color: var(--ntv-orange); }
 
   @media (max-width: 900px) {
     #portal-main { margin-left: 0; padding: 24px 16px; width: 100%; overflow-x: hidden; }
