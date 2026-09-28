@@ -270,35 +270,42 @@ for (const d of days) {
 
   {isEditable && (
     <div id="status-popover" class="status-popover hidden">
-      <div class="popover-date" id="popover-date"></div>
+      <div class="popover-header">
+        <div class="popover-date" id="popover-date"></div>
+        <button type="button" id="popover-dismiss" class="popover-dismiss-btn" aria-label="Close">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
       <div id="popover-logs" class="popover-logs"></div>
-      <label class="range-toggle">
-        <input type="checkbox" id="popover-range-toggle" />
-        Apply to a date range
-      </label>
-      <div id="popover-range-fields" class="popover-range-fields hidden">
-        <span class="range-label">through</span>
-        <input type="date" id="popover-end-date" />
-      </div>
-      <label class="half-day-toggle">
-        <input type="checkbox" id="popover-half-day" />
-        Half day
-      </label>
-      <div class="popover-reason">
-        <label class="reason-label" for="popover-reason">Reason <span>(optional)</span></label>
-        <input type="text" id="popover-reason" maxlength="200" placeholder="e.g. Fever, family emergency, WFH — no transport" />
-      </div>
-      <div class="popover-buttons-label">Tap a status to apply it:</div>
-      <div class="popover-buttons">
-        <button class="status-btn present" data-status="present"><span class="btn-label">Present</span></button>
-        <button class="status-btn absent" data-status="absent"><span class="btn-label">Absent</span></button>
-        <button class="status-btn wfh" data-status="wfh"><span class="btn-label">WFH</span></button>
-        <button class="status-btn sl" data-status="sl" title="Sick Leave"><span class="btn-label">SL</span></button>
-        <button class="status-btn vl full-width" data-status="vl" title="Vacation Leave"><span class="btn-label">VL</span></button>
-      </div>
-      <div class="popover-footer">
-        <button id="popover-clear" class="popover-clear-btn"><span class="btn-label">Clear</span></button>
-        <button id="popover-close" class="popover-close-btn">Cancel</button>
+      <div id="popover-edit-section">
+        <label class="range-toggle">
+          <input type="checkbox" id="popover-range-toggle" />
+          Apply to a date range
+        </label>
+        <div id="popover-range-fields" class="popover-range-fields hidden">
+          <span class="range-label">through</span>
+          <input type="date" id="popover-end-date" />
+        </div>
+        <label class="half-day-toggle">
+          <input type="checkbox" id="popover-half-day" />
+          Half day
+        </label>
+        <div class="popover-reason">
+          <label class="reason-label" for="popover-reason">Reason <span>(optional)</span></label>
+          <input type="text" id="popover-reason" maxlength="200" placeholder="e.g. Fever, family emergency, WFH — no transport" />
+        </div>
+        <div class="popover-buttons-label">Tap a status to apply it:</div>
+        <div class="popover-buttons">
+          <button class="status-btn present" data-status="present"><span class="btn-label">Present</span></button>
+          <button class="status-btn absent" data-status="absent"><span class="btn-label">Absent</span></button>
+          <button class="status-btn wfh" data-status="wfh"><span class="btn-label">WFH</span></button>
+          <button class="status-btn sl" data-status="sl" title="Sick Leave"><span class="btn-label">SL</span></button>
+          <button class="status-btn vl full-width" data-status="vl" title="Vacation Leave"><span class="btn-label">VL</span></button>
+        </div>
+        <div class="popover-footer">
+          <button id="popover-clear" class="popover-clear-btn"><span class="btn-label">Clear</span></button>
+          <button id="popover-close" class="popover-close-btn">Cancel</button>
+        </div>
       </div>
     </div>
   )}
@@ -408,26 +415,56 @@ for (const d of days) {
     return h > 0 ? `${h}h ${m}m` : `${m}m`;
   };
   const escapeHtml = (s) => (s || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const timeToSeconds = (t) => {
+    if (!t) return 0;
+    const [h, m, s] = t.split(":").map(Number);
+    return h * 3600 + (m || 0) * 60 + (s || 0);
+  };
 
+  // Same gap-between-sessions "Break" divider as the Time Tracker tab: entries here are already
+  // chronological (earliest first), so a divider goes right after any entry that isn't immediately
+  // followed by the next one.
   const logsHtml = (data) => {
     if (!data.items.length) return '<div class="day-details-empty">No time logged for this day.</div>';
-    const rows = data.items.map((item) => `
-      <li class="day-details-item">
-        <span class="ddi-desc">${escapeHtml(item.description)}</span>
-        <span class="ddi-time">${formatClock(item.startTime)} – ${formatClock(item.endTime)}</span>
-        <span class="ddi-duration">${formatDuration(item.durationSeconds)}</span>
-      </li>
-    `).join("");
-    return `<ul class="day-details-list">${rows}</ul><div class="day-details-total">Total: ${formatDuration(data.totalSeconds)}</div>`;
+    const rows = data.items.map((item, idx) => {
+      const entry = `
+        <li class="log-entry source-${item.source}">
+          <div class="log-entry-body">
+            <div class="log-entry-top">
+              <span class="log-entry-desc">${escapeHtml(item.description)}</span>
+              <span class="log-entry-duration">${formatDuration(item.durationSeconds)}</span>
+            </div>
+            <span class="log-entry-time">${formatClock(item.startTime)} – ${formatClock(item.endTime)}</span>
+          </div>
+        </li>
+      `;
+      const next = data.items[idx + 1];
+      if (!next) return entry;
+      const gapMin = Math.round((timeToSeconds(next.startTime) - timeToSeconds(item.endTime)) / 60);
+      if (gapMin <= 0) return entry;
+      return `${entry}
+        <li class="log-break-divider">
+          <span class="log-break-line"></span>
+          <span class="log-break-label">Break — ${formatDuration(gapMin * 60)}</span>
+          <span class="log-break-line"></span>
+        </li>
+      `;
+    }).join("");
+    return `
+      <ul class="day-logs-list">${rows}</ul>
+      <div class="day-logs-total"><span>Total logged</span><span>${formatDuration(data.totalSeconds)}</span></div>
+    `;
   };
 
   // Fetches and renders `date`'s logs into `container`, tagging each request so a slow one that
   // resolves after the user has already moved to another day doesn't overwrite what's shown now.
+  // `onData` (optional) gets the parsed response once loaded, so callers can react to whether the
+  // day actually has real logged sessions — e.g. hiding the status-editing controls when it does.
   let logsRequestToken = 0;
-  async function loadLogsInto(container, date) {
+  async function loadLogsInto(container, date, onData) {
     if (!container) return;
     const myToken = ++logsRequestToken;
-    container.innerHTML = '<div class="day-details-loading">Loading…</div>';
+    container.innerHTML = '<div class="day-details-loading">Loading time logs…</div>';
 
     const url = new URL("/api/attendance/day-entries", window.location.origin);
     url.searchParams.set("date", date);
@@ -438,11 +475,13 @@ for (const d of days) {
       const res = await fetch(url);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to load time logs");
-      if (logsRequestToken === myToken) container.innerHTML = logsHtml(data);
+      if (logsRequestToken !== myToken) return;
+      container.innerHTML = logsHtml(data);
+      onData?.(data);
     } catch (err) {
-      if (logsRequestToken === myToken) {
-        container.innerHTML = `<div class="day-details-empty">${err.message || "Error loading time logs"}</div>`;
-      }
+      if (logsRequestToken !== myToken) return;
+      container.innerHTML = `<div class="day-details-empty">${err.message || "Error loading time logs"}</div>`;
+      onData?.(null);
     }
   }
 
@@ -471,6 +510,7 @@ for (const d of days) {
     const endDateInput = document.getElementById("popover-end-date");
     const reasonInput = document.getElementById("popover-reason");
     const popoverLogs = document.getElementById("popover-logs");
+    const popoverEditSection = document.getElementById("popover-edit-section");
     let activeCell = null;
     // Bumped every time a save starts; a completing request only releases the popover's shared
     // busy state if it's still the most recent one — otherwise a slow, stale request finishing
@@ -537,7 +577,12 @@ for (const d of days) {
       });
 
       popoverDate.textContent = `${cell.dataset.date} — currently ${statusLabel(cell.dataset.status)}`;
-      loadLogsInto(popoverLogs, cell.dataset.date);
+      // A day with real logged sessions already speaks for itself — editing its status would just
+      // contradict the actual record, so the status controls only show up for days with no logs.
+      popoverEditSection.classList.add("hidden");
+      loadLogsInto(popoverLogs, cell.dataset.date, (data) => {
+        popoverEditSection.classList.toggle("hidden", !!data && data.items.length > 0);
+      });
       halfDayCheckbox.checked = cell.dataset.half === '1';
 
       reasonInput.value = cell.dataset.reason || '';
@@ -559,6 +604,7 @@ for (const d of days) {
     });
 
     document.getElementById("popover-close")?.addEventListener("click", closePopover);
+    document.getElementById("popover-dismiss")?.addEventListener("click", closePopover);
     document.addEventListener("click", (e) => {
       if (!activeCell) return;
       if (popover.contains(e.target) || e.target.closest(".day-cell")) return;
@@ -934,19 +980,17 @@ for (const d of days) {
   .holiday-row button:disabled:not(.is-loading) {
     opacity: 0.6; cursor: not-allowed;
   }
-  .popover-date { font-size: 11px; color: var(--text-secondary); margin-bottom: 10px; }
-  .popover-logs { margin-bottom: 10px; }
-  .popover-logs:empty { display: none; }
-  .popover-logs .day-details-loading, .popover-logs .day-details-empty { font-size: 11px; color: var(--text-secondary); }
-  .popover-logs .day-details-list { list-style: none; display: flex; flex-direction: column; gap: 6px; max-height: 140px; overflow-y: auto; }
-  .popover-logs .day-details-item {
-    display: grid; grid-template-columns: 1fr auto; gap: 1px 8px; align-items: baseline;
-    background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 6px 8px;
+  .popover-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+  .popover-date { font-size: 11px; color: var(--text-secondary); }
+  .popover-dismiss-btn {
+    flex-shrink: 0; background: none; border: none; color: var(--text-secondary); cursor: pointer;
+    padding: 2px; border-radius: 4px; display: flex; line-height: 0; transition: color 0.15s;
   }
-  .popover-logs .ddi-desc { font-size: 11px; font-weight: 600; color: var(--text-primary); grid-column: 1 / -1; }
-  .popover-logs .ddi-time { font-size: 10px; color: var(--text-secondary); }
-  .popover-logs .ddi-duration { font-size: 10px; font-weight: 700; color: var(--ntv-orange); text-align: right; }
-  .popover-logs .day-details-total { margin-top: 6px; font-size: 11px; font-weight: 700; color: var(--text-primary); text-align: right; }
+  .popover-dismiss-btn:hover { color: var(--text-primary); }
+  .popover-logs { margin-bottom: 12px; }
+  .popover-logs:empty { display: none; }
+  .popover-logs .day-logs-list { max-height: 160px; }
+  #popover-edit-section.hidden { display: none; }
   .popover-buttons-label { font-size: 11px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; }
   .popover-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 10px; }
   .status-btn { padding: 8px; border-radius: 6px; border: none; font-size: 12px; font-weight: 700; cursor: pointer; color: #050b16; }
@@ -1031,19 +1075,51 @@ for (const d of days) {
 
   /* Day details modal (time-tracker sessions for one day) */
   .day-details-content { max-width: 420px; }
-  .day-details-loading, .day-details-empty { font-size: 13px; color: var(--text-secondary); padding: 8px 0; }
-  .day-details-list { list-style: none; display: flex; flex-direction: column; gap: 8px; max-height: 50vh; overflow-y: auto; }
-  .day-details-item {
-    display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; align-items: baseline;
-    background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 10px 12px;
+  .day-details-loading, .day-details-empty {
+    font-size: 12.5px; color: var(--text-secondary); padding: 14px 12px; text-align: center;
+    background: rgba(255,255,255,0.02); border: 1px dashed var(--border-subtle); border-radius: 10px;
   }
-  .ddi-desc { font-size: 13px; font-weight: 600; color: var(--text-primary); grid-column: 1 / -1; }
-  .ddi-time { font-size: 11.5px; color: var(--text-secondary); }
-  .ddi-duration { font-size: 11.5px; font-weight: 700; color: var(--ntv-orange); text-align: right; }
-  .day-details-total {
+
+  /* Shared session-list look — used both inside the status popover and the read-only modal.
+     A colored left bar tells manual entries (orange, matches the site accent) from synced
+     Clockify sessions (green, matches the DTR page's "Clockify Synced" indicator) apart. */
+  .day-logs-list { list-style: none; display: flex; flex-direction: column; gap: 8px; max-height: 50vh; overflow-y: auto; padding-right: 2px; }
+  .log-entry {
+    position: relative; overflow: hidden; padding: 9px 12px 9px 14px;
+    background: rgba(255,255,255,0.04); border: 1px solid var(--border-subtle); border-radius: 10px;
+  }
+  .log-entry::before {
+    content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--ntv-orange);
+  }
+  .log-entry.source-clockify::before { background: #34d399; }
+  .log-entry-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+  .log-entry-desc {
+    font-size: 12.5px; font-weight: 700; color: var(--text-primary);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .log-entry-duration {
+    flex-shrink: 0; font-size: 10.5px; font-weight: 800; color: var(--ntv-orange);
+    background: rgba(237, 102, 33, 0.12); padding: 2px 8px; border-radius: 20px;
+  }
+  .log-entry.source-clockify .log-entry-duration { color: #34d399; background: rgba(52, 211, 153, 0.12); }
+  .log-entry-time { display: block; margin-top: 3px; font-size: 11px; color: var(--text-secondary); }
+
+  /* Same gap-between-sessions divider as the Time Tracker tab. */
+  .log-break-divider { display: flex; align-items: center; gap: 8px; padding: 0 2px; }
+  .log-break-line {
+    flex: 1; height: 1px;
+    background: repeating-linear-gradient(90deg, rgba(255,255,255,0.12) 0, rgba(255,255,255,0.12) 4px, transparent 4px, transparent 8px);
+  }
+  .log-break-label {
+    font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--text-secondary); opacity: 0.7; white-space: nowrap;
+  }
+  .day-logs-total {
     margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-subtle);
-    font-size: 13px; font-weight: 700; color: var(--text-primary); text-align: right;
+    display: flex; justify-content: space-between; align-items: center;
   }
+  .day-logs-total span:first-child { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-secondary); }
+  .day-logs-total span:last-child { font-size: 15px; font-weight: 800; color: var(--text-primary); }
 
   @media (max-width: 900px) {
     #portal-main { margin-left: 0; padding: 24px 16px; width: 100%; overflow-x: hidden; }
