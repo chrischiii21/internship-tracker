@@ -6,7 +6,8 @@ import { getSession } from '../lib/auth';
 import { parse } from 'cookie';
 import { getAppSettings } from '../lib/settings';
 import { supabase } from '../lib/supabase';
-import { formatHours } from '../lib/utils';
+import CoordinatorData from '../components/CoordinatorData.astro';
+import CoordinatorRosterTable from '../components/CoordinatorRosterTable.astro';
 
 const cookieHeader = Astro.request.headers.get('cookie') || '';
 const cookies = parse(cookieHeader);
@@ -17,7 +18,6 @@ if (!user) return Astro.redirect('/');
 const settings = await getAppSettings(user.id);
 if (settings.role !== 'coordinator') return Astro.redirect('/dashboard');
 
-import { getStudentProgress } from '../lib/clockify';
 
 
 
@@ -34,49 +34,16 @@ const { data: students } = await supabase
   .select('*, coordinator_sections(section_name)')
   .eq('coordinator_id', user.id);
 
-// Fetch Total Rendered Hours (Syncing Clockify on top of cached manual hours)
-const studentStats = await Promise.all((students || []).map(async (s) => {
-  // getStudentProgress now uses the cached DB value internally for speed
-  const hours = await getStudentProgress(s.user_id, s.user_email, s.start_date);
-  const percent = Math.min(100, (hours / s.target_hours) * 100);
-  
-  return {
-    ...s,
-    renderedHours: hours,
-    percent: percent.toFixed(1)
-  };
-}));
-
 const selectedSection = Astro.url.searchParams.get('section') || 'all';
 const selectedAgency = Astro.url.searchParams.get('agency') || 'all';
 const selectedStatus = Astro.url.searchParams.get('status') || 'all';
 
-// Apply Section filtering first to determine statistical overview counts
-let sectionFilteredStudents = studentStats;
-if (selectedSection !== 'all') {
-  sectionFilteredStudents = studentStats.filter(s => s.section_id === selectedSection);
-}
-
-const completedCount = sectionFilteredStudents.filter(s => Number(s.percent) >= 100).length;
-const inProgressCount = sectionFilteredStudents.length - completedCount;
-const totalTargetHours = sectionFilteredStudents.reduce((acc, s) => acc + s.target_hours, 0);
-const totalRenderedHours = sectionFilteredStudents.reduce((acc, s) => acc + s.renderedHours, 0);
-
-// Unique agencies for the filter dropdown based on section filtered list
+// Agencies for the filter dropdown, from the section-filtered roster. Hours (and so the
+// completed / in-progress split and the table) come from the CoordinatorData server island.
+const sectionFilteredStudents = selectedSection === 'all'
+  ? (students || [])
+  : (students || []).filter(s => s.section_id === selectedSection);
 const agencies = [...new Set(sectionFilteredStudents.map(s => s.host_company).filter(Boolean))].sort();
-
-// Roster filtered list
-let filteredStudents = sectionFilteredStudents;
-
-if (selectedAgency !== 'all') {
-  filteredStudents = filteredStudents.filter(s => s.host_company === selectedAgency);
-}
-
-if (selectedStatus === 'completed') {
-  filteredStudents = filteredStudents.filter(s => Number(s.percent) >= 100);
-} else if (selectedStatus === 'ongoing') {
-  filteredStudents = filteredStudents.filter(s => Number(s.percent) < 100);
-}
 ---
 
 <Layout>
@@ -142,15 +109,15 @@ if (selectedStatus === 'completed') {
         <div class="stats-overview">
           <div class="stat-card">
             <div class="stat-label">Total Students</div>
-            <div class="stat-value">{studentStats.length}</div>
+            <div class="stat-value">{(students || []).length}</div>
           </div>
           <div class="stat-card completed">
             <div class="stat-label">Completed</div>
-            <div class="stat-value">{completedCount}</div>
+            <div class="stat-value" id="coord-completed"><span class="sk-num"></span></div>
           </div>
           <div class="stat-card active">
             <div class="stat-label">In Progress</div>
-            <div class="stat-value">{inProgressCount}</div>
+            <div class="stat-value" id="coord-in-progress"><span class="sk-num"></span></div>
           </div>
         </div>
 
@@ -190,64 +157,11 @@ if (selectedStatus === 'completed') {
             </div>
           </div>
           
-          <div class="table-wrapper">
-            <table class="student-table">
-              <thead>
-                <tr>
-                  <th>Student Name</th>
-                  <th>Section</th>
-                  <th>Agency</th>
-                  <th>Hours Rendered</th>
-                  <th>Progress</th>
-                  <th>Status</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredStudents.length > 0 ? filteredStudents.map((s) => (
-                  <tr>
-                    <td>
-                      <div class="student-info-cell">
-                        {s.user_picture && <img src={s.user_picture} alt="" class="row-avatar" />}
-                        <span class="row-name">{s.user_name}</span>
-                      </div>
-                    </td>
-                    <td>
-                      <span class="program-tag" style="opacity: 0.85;">
-                        {s.coordinator_sections?.section_name || 'General / Unassigned'}
-                      </span>
-                    </td>
-                    <td><span class="program-tag">{s.host_company}</span></td>
-                    <td class="mono">{formatHours(s.renderedHours)} / {formatHours(s.target_hours)}</td>
-                    <td>
-                      <div class="progress-col">
-                        <span class="percent">{s.percent}%</span>
-                        <div class="mini-track">
-                          <div class="mini-fill" style={`width: ${s.percent}%`}></div>
-                        </div>
-                      </div>
-                    </td>
-                    <td>
-                      <span class={`status-badge ${Number(s.percent) >= 100 ? 'done' : 'active'}`}>
-                        {Number(s.percent) >= 100 ? 'Completed' : 'In Progress'}
-                      </span>
-                    </td>
-                    <td>
-                      <a href={`/dtr?studentId=${s.user_id}`} class="view-link">View DTR</a>
-                    </td>
-                  </tr>
-                )) : (
-                  <tr>
-                    <td colspan="7" class="empty-state">No students match the criteria for this section.</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+          <CoordinatorData server:defer viewerId={user.id} section={selectedSection} agency={selectedAgency} status={selectedStatus}>
+            <CoordinatorRosterTable slot="fallback" />
+          </CoordinatorData>
         </div>
-
-
-
+      </div>
     </main>
   </div>
 </Layout>
@@ -347,6 +261,17 @@ if (selectedStatus === 'completed') {
     const newUrl = window.location.pathname;
     window.history.replaceState({}, '', newUrl);
   }
+
+  // Completed / In Progress need every student's hours, which arrive with the roster
+  // (CoordinatorData server island) after the page shell.
+  function onRosterData() {
+    const data = document.getElementById('coord-data')?.dataset;
+    if (!data) return;
+    document.getElementById('coord-completed').textContent = data.completed;
+    document.getElementById('coord-in-progress').textContent = data.inProgress;
+  }
+  if (window.__coordRosterReady) onRosterData();
+  document.addEventListener('coord:roster-ready', onRosterData);
 </script>
 
 <style>
@@ -404,6 +329,13 @@ if (selectedStatus === 'completed') {
   .stat-card.active .stat-label { color: #60a5fa; }
   .stat-label { font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
   .stat-value { font-size: 28px; font-weight: 700; color: #fff; }
+  .sk-num {
+    display: inline-block; width: 48px; height: 26px; border-radius: 6px; vertical-align: middle;
+    background: linear-gradient(90deg, rgba(127,127,127,.08) 25%, rgba(127,127,127,.18) 50%, rgba(127,127,127,.08) 75%);
+    background-size: 200% 100%; animation: sk-shimmer 1.4s ease-in-out infinite;
+  }
+  @keyframes sk-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+  @media (prefers-reduced-motion: reduce) { .sk-num { animation: none; } }
   .unit { font-size: 14px; color: var(--text-secondary); font-weight: 500; }
 
   .student-section { margin-top: 40px; }
@@ -424,47 +356,11 @@ if (selectedStatus === 'completed') {
     .filter-select { width: 100%; flex: 1; }
   }
 
-  .student-info-cell { display: flex; align-items: center; gap: 12px; }
-  .row-avatar { width: 28px; height: 28px; border-radius: 50%; border: 1.5px solid var(--ntv-orange); }
-  .row-name { font-weight: 600; color: #fff; }
-  
-  .table-wrapper { background: var(--card-bg); border: 1px solid var(--border-subtle); border-radius: 16px; overflow: hidden; }
-  .student-table { width: 100%; border-collapse: collapse; text-align: left; }
-  .student-table th { padding: 14px 20px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-secondary); border-bottom: 1px solid var(--border-subtle); }
-  .student-table td { padding: 16px 20px; border-bottom: 1px solid var(--border-subtle); font-size: 14px; }
-  .student-table tr:last-child td { border-bottom: none; }
-  .student-table tr:hover { background: rgba(237, 102, 33, 0.02); }
-
-  .student-profile { display: flex; align-items: center; gap: 12px; }
-  .avatar { width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--border-subtle); }
-  .profile-info { display: flex; flex-direction: column; }
-  .name { font-weight: 600; color: #fff; }
-  .email { font-size: 11px; color: var(--text-secondary); }
-
-  .program-tag { font-size: 12px; color: var(--text-primary); }
-  .mono { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: #fff; }
-  
-  .progress-col { display: flex; flex-direction: column; gap: 6px; min-width: 140px; }
-  .percent { font-size: 12px; font-weight: 700; color: var(--ntv-orange); font-family: 'JetBrains Mono', monospace; }
-  .mini-track { width: 100%; height: 4px; background: rgba(255,255,255,0.05); border-radius: 2px; }
-  .mini-fill { height: 100%; background: var(--ntv-gradient); border-radius: 2px; }
-
-  .status-badge { display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; font-size: 10px; font-weight: 700; padding: 4px 10px; border-radius: 20px; }
-  .status-badge.active { background: rgba(52, 211, 153, 0.1); color: #34d399; border: 1px solid rgba(52, 211, 153, 0.2); }
-  .status-badge.done { background: var(--ntv-gradient); color: #fff; }
-
-  .view-link { display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; font-size: 11px; font-weight: 700; color: var(--ntv-orange); text-decoration: none; padding: 6px 12px; background: rgba(237, 102, 33, 0.1); border: 1px solid rgba(237, 102, 33, 0.2); border-radius: 6px; transition: 0.2s; }
-  .view-link:hover { background: var(--ntv-orange); color: #fff; }
-
-  .empty-state { text-align: center; padding: 60px; color: var(--text-secondary); font-style: italic; }
-
   @media (max-width: 900px) {
     #portal-main { margin-left: 0; padding: 20px; width: 100%; overflow-x: hidden; }
     #coord-content { width: 100%; }
     .page-header { flex-direction: column; gap: 20px; }
     .invite-panel-note { max-width: 100%; width: 100%; }
-    .table-wrapper { overflow-x: auto; }
-    .student-table { min-width: 700px; }
   }
 
   /* Onboarding modal styles */

@@ -6,9 +6,8 @@ import { getSession } from '../lib/auth';
 import { parse } from 'cookie';
 import { getAppSettings } from '../lib/settings';
 import { supabase } from '../lib/supabase';
-import { formatHours } from '../lib/utils';
-import { getStudentProgress, getClockifyUser, getClockifyDetailedEntries } from '../lib/clockify';
-import { getManualEntries } from '../lib/entries';
+import SectionRosterData from '../components/SectionRosterData.astro';
+import SectionRosterTable from '../components/SectionRosterTable.astro';
 
 const cookieHeader = Astro.request.headers.get('cookie') || '';
 const cookies = parse(cookieHeader);
@@ -80,72 +79,11 @@ const studentCountList = students || [];
 
 const viewSection = Astro.url.searchParams.get('viewSection');
 
-let filteredStudents = [];
-let sectionName = '';
-let sectionInviteCode = '';
-let sectionStudentsLogs = [];
-
-if (viewSection) {
-  // Sync hours and DTR progress (same logic as coordinator page)
-  const studentStats = await Promise.all(studentCountList.map(async (s) => {
-    const hours = await getStudentProgress(s.user_id, s.user_email, s.start_date);
-    const percent = Math.min(100, (hours / s.target_hours) * 100);
-    return {
-      ...s,
-      renderedHours: hours,
-      percent: percent.toFixed(1)
-    };
-  }));
-
-  filteredStudents = studentStats.filter(s => s.section_id === viewSection);
-  const matchedSec = (sections || []).find(sec => sec.id === viewSection);
-  sectionName = matchedSec ? matchedSec.section_name : 'Unknown Section';
-  sectionInviteCode = matchedSec ? matchedSec.invite_code : '';
-
-  // Fetch detailed logs for each student in the filtered list
-  sectionStudentsLogs = await Promise.all(filteredStudents.map(async (s) => {
-    // 1. Fetch manual entries
-    const manual = await getManualEntries(s.user_id);
-    
-    // 2. Fetch Clockify entries (if enabled)
-    let clockify = [];
-    if (s.clockify_enabled !== false) {
-      try {
-        const cUser = await getClockifyUser(s.user_email);
-        if (cUser) {
-          clockify = await getClockifyDetailedEntries(cUser.id, s.start_date);
-        }
-      } catch (err) {
-        console.error('Error fetching student Clockify logs in sections:', err);
-      }
-    }
-    
-    // 3. Combine and sort entries by date + start_time descending
-    const combinedEntries = [
-      ...manual.map(m => ({ ...m, type: 'manual' })),
-      ...clockify.map(c => ({ ...c, type: 'clockify' }))
-    ].sort((a, b) => {
-      const dateA = new Date(`${a.date}T${a.startTime}`);
-      const dateB = new Date(`${b.date}T${b.startTime}`);
-      return dateB.getTime() - dateA.getTime();
-    });
-
-    return {
-      userId: s.user_id,
-      userName: s.user_name,
-      userPicture: s.user_picture,
-      program: s.program || 'N/A',
-      company: s.host_company || 'N/A',
-      startDate: s.start_date || 'N/A',
-      supervisor: s.supervisor || 'N/A',
-      supervisorPosition: s.supervisor_position || 'N/A',
-      renderedHours: s.renderedHours,
-      targetHours: s.target_hours,
-      percent: s.percent,
-      entries: combinedEntries
-    };
-  }));
-}
+// A section's roster (hours, logs) comes from the SectionRosterData server island; the page only
+// needs the section's name and invite code, which it already has.
+const matchedSec = viewSection ? (sections || []).find(sec => sec.id === viewSection) : null;
+const sectionName = matchedSec ? matchedSec.section_name : 'Unknown Section';
+const sectionInviteCode = matchedSec ? matchedSec.invite_code : '';
 ---
 
 <Layout title="Manage Sections">
@@ -187,56 +125,9 @@ if (viewSection) {
                 </div>
               </div>
               
-              <div class="table-wrapper">
-                <table class="student-table">
-                  <thead>
-                    <tr>
-                      <th>Student Name</th>
-                      <th>Agency</th>
-                      <th>Hours Rendered</th>
-                      <th>Progress</th>
-                      <th>Status</th>
-                      <th>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredStudents.length > 0 ? filteredStudents.map((s) => (
-                      <tr>
-                        <td>
-                          <div class="student-info-cell">
-                            {s.user_picture && <img src={s.user_picture} alt="" class="row-avatar" />}
-                            <span class="row-name">{s.user_name}</span>
-                          </div>
-                        </td>
-                        <td><span class="program-tag">{s.host_company}</span></td>
-                        <td class="mono">{formatHours(s.renderedHours)} / {formatHours(s.target_hours)}</td>
-                        <td>
-                          <div class="progress-col">
-                            <span class="percent">{s.percent}%</span>
-                            <div class="mini-track">
-                              <div class="mini-fill" style={`width: ${s.percent}%`}></div>
-                            </div>
-                          </div>
-                        </td>
-                        <td>
-                          <span class={`status-badge ${Number(s.percent) >= 100 ? 'done' : 'active'}`}>
-                            {Number(s.percent) >= 100 ? 'Completed' : 'In Progress'}
-                          </span>
-                        </td>
-                        <td>
-                          <button type="button" class="view-link view-progress-btn" data-user-id={s.user_id} style="background: rgba(237, 102, 33, 0.1); border: 1px solid rgba(237, 102, 33, 0.2); border-radius: 6px; cursor: pointer; outline: none; transition: 0.2s;">
-                            View Student Progress
-                          </button>
-                        </td>
-                      </tr>
-                    )) : (
-                      <tr>
-                        <td colspan="6" class="empty-state">No students match the criteria for this section.</td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+              <SectionRosterData server:defer viewerId={user.id} sectionId={viewSection}>
+                <SectionRosterTable slot="fallback" />
+              </SectionRosterData>
             </div>
           ) : (
             <div class="sections-grid">
@@ -427,10 +318,9 @@ if (viewSection) {
   }
 </script>
 
-<script define:vars={{ sectionStudentsLogs }}>
-  // Save section log details to window
-  window.sectionStudentsLogs = sectionStudentsLogs || [];
-
+<script is:inline>
+  // window.sectionStudentsLogs (each student's details and logs) is set by the SectionRosterData
+  // server island when the roster lands.
   const progressModal = document.getElementById('student-progress-modal');
   const closeBtn = document.getElementById('close-progress-modal-btn');
 
@@ -446,12 +336,13 @@ if (viewSection) {
     if (e.target === progressModal) closeProgressModal();
   });
 
-  // Bind View Student Progress buttons
-  document.querySelectorAll('.view-progress-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
+  // View Student Progress buttons — delegated, since the roster arrives after this script.
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.view-progress-btn');
+    if (!btn) return;
+    {
       const userId = btn.getAttribute('data-user-id');
-      const student = window.sectionStudentsLogs.find(s => s.userId === userId);
+      const student = (window.sectionStudentsLogs || []).find(s => s.userId === userId);
       if (!student) return;
 
       // Populate Modal Fields
@@ -554,7 +445,7 @@ if (viewSection) {
         progressModal.classList.add('active');
         document.body.style.overflow = 'hidden';
       }
-    });
+    }
   });
 
   // Helper function to format seconds to HH:MM:SS
@@ -858,31 +749,12 @@ if (viewSection) {
     transform: translateX(-2px);
   }
 
-  .student-info-cell { display: flex; align-items: center; gap: 12px; }
-  .row-avatar { width: 28px; height: 28px; border-radius: 50%; border: 1.5px solid var(--ntv-orange); }
-  .row-name { font-weight: 600; color: #fff; }
-  
-  .table-wrapper { background: var(--card-bg); border: 1px solid var(--border-subtle); border-radius: 16px; overflow: hidden; }
+  /* The roster table itself lives in SectionRosterTable; the progress modal's log table reuses this. */
   .student-table { width: 100%; border-collapse: collapse; text-align: left; }
   .student-table th { padding: 14px 20px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-secondary); border-bottom: 1px solid var(--border-subtle); }
   .student-table td { padding: 16px 20px; border-bottom: 1px solid var(--border-subtle); font-size: 14px; }
   .student-table tr:last-child td { border-bottom: none; }
   .student-table tr:hover { background: rgba(237, 102, 33, 0.02); }
-
-  .program-tag { font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 6px; background: rgba(255,255,255,0.03); border: 1.5px solid rgba(255,255,255,0.08); color: var(--text-secondary); }
-  .progress-col { display: flex; flex-direction: column; gap: 6px; width: 120px; }
-  .progress-col .percent { font-size: 11px; font-weight: 700; color: var(--text-primary); }
-  .mini-track { height: 4px; background: rgba(255,255,255,0.05); border-radius: 2px; overflow: hidden; }
-  .mini-fill { height: 100%; background: var(--ntv-gradient); border-radius: 2px; }
-  
-  .status-badge { display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; padding: 4px 8px; border-radius: 6px; }
-  .status-badge.active { background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.2); color: #60a5fa; }
-  .status-badge.done { background: var(--ntv-gradient); color: #fff; }
-
-  .view-link { display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; font-size: 11px; font-weight: 700; color: var(--ntv-orange); text-decoration: none; padding: 6px 12px; background: rgba(237, 102, 33, 0.1); border: 1px solid rgba(237, 102, 33, 0.2); border-radius: 6px; transition: 0.2s; }
-  .view-link:hover { background: var(--ntv-orange); color: #fff; }
-
-  .empty-state { text-align: center; padding: 60px; color: var(--text-secondary); font-style: italic; }
 
   /* Modal overlay & transitions styles */
   .modal-overlay {
@@ -978,7 +850,6 @@ if (viewSection) {
     #sections-content { width: 100%; }
     .page-header { flex-direction: column; gap: 20px; }
     .roster-header { flex-direction: column; align-items: flex-start; gap: 12px; }
-    .table-wrapper { overflow-x: auto; }
     .student-table { min-width: 700px; }
   }
 

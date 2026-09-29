@@ -1,0 +1,113 @@
+---
+// Server island for the DTR sheet (server:defer in pages/dtr.astro): the page shell paints right
+// away and the month's hours (entries, Clockify, attendance marks) arrive in this request.
+// The page has already worked out whose sheet it is — a coordinator can open a student's — and
+// passes those ids as encrypted props; the session must still belong to the viewer they were
+// issued for.
+import { getSession } from '../lib/auth';
+import { parse } from 'cookie';
+import { getAppSettings, type AppSettings } from '../lib/settings';
+import { getClockifyUser, getDailyDTR } from '../lib/clockify';
+import { getManualEntries, getActiveTimer } from '../lib/entries';
+import { getOverridesForMonth } from '../lib/attendance';
+import { getShiftConfig } from '../lib/shift';
+import DtrSheet from './DtrSheet.astro';
+
+interface Props {
+  viewerId: string;
+  viewUserId: string;
+  month: number;
+  year: number;
+  isEditable: boolean;
+  isCoordinator: boolean;
+}
+
+const { viewerId, viewUserId, isEditable, isCoordinator } = Astro.props;
+
+// Per-user data: never let a shared cache hold on to it.
+Astro.response.headers.set('Cache-Control', 'private, no-store');
+
+// Switching month in place re-requests this island with ?month=&year= added to its URL.
+const query = Astro.url.searchParams;
+const queryMonth = Number(query.get('month'));
+const queryYear = Number(query.get('year'));
+const month = Number.isInteger(queryMonth) && queryMonth >= 1 && queryMonth <= 12 ? queryMonth : Astro.props.month;
+const year = Number.isInteger(queryYear) && queryYear >= 2000 && queryYear <= 2100 ? queryYear : Astro.props.year;
+
+const cookies = parse(Astro.request.headers.get('cookie') || '');
+const user = cookies.session ? await getSession(cookies.session) : null;
+const settings = user && user.id === viewerId ? await getAppSettings(viewUserId) : null;
+
+async function loadMonth(settings: AppSettings) {
+  const isClockifySet = !!(import.meta.env.CLOCKIFY_API_KEY && import.meta.env.CLOCKIFY_WORKSPACE_ID);
+
+  // Independent reads, fetched together instead of one round trip after another.
+  const [manual, shiftConfig, overrides, clockifyUser] = await Promise.all([
+    getManualEntries(viewUserId, settings.isEmployee ?? false),
+    getShiftConfig(viewUserId),
+    getOverridesForMonth(viewUserId, settings.isEmployee ?? false, month, year),
+    isClockifySet && settings.clockifyEnabled !== false ? getClockifyUser(settings.userEmail || "").catch(() => null) : null,
+  ]);
+  const manualFiltered = manual.filter((e) => {
+    const d = new Date(e.startFull || `${e.date}T${e.startTime}+08:00`);
+    return d.getMonth() + 1 === month && d.getFullYear() === year;
+  });
+
+  // Currently clocked in (Header widget or Dashboard task timer)? Show today's punch-in on the
+  // grid right away instead of waiting for Time Out — a zero-duration start===end entry is the
+  // same "in, no out yet" shape getDailyDTR already renders for open manual punches.
+  const activeTimer = await getActiveTimer(viewUserId, settings.isEmployee ?? false);
+  if (activeTimer) {
+    const activeStart = new Date(activeTimer.startTime);
+    if (activeStart.getMonth() + 1 === month && activeStart.getFullYear() === year) {
+      manualFiltered.push({
+        startFull: activeTimer.startTime,
+        endFull: activeTimer.startTime,
+        durationSeconds: 0,
+      } as any);
+    }
+  }
+
+  const clockifyId = clockifyUser?.id || "";
+  const result = await getDailyDTR(clockifyId, month, year, manualFiltered, shiftConfig.shiftType);
+
+  // Days marked in the Attendance Chart that have no actual logged time yet. Present/WFH are
+  // flagged as needing manual input (you claimed you worked, but there's nothing logged);
+  // Absent/SL/VL are expected to have no log by definition, so they just get a quiet badge.
+  const overridesByDay: Record<number, { status: string; isHalfDay: boolean; reason: string | null }> = {};
+  for (const o of overrides) {
+    const d = parseInt(o.date.split('-')[2], 10);
+    overridesByDay[d] = { status: o.status, isHalfDay: o.isHalfDay, reason: o.reason };
+  }
+
+  return {
+    dtrData: result.days.reduce((acc, d) => {
+      acc[d.day] = d;
+      return acc;
+    }, {} as Record<string, any>),
+    totalMonthSeconds: result.totalMonthlyHours * 3600,
+    overridesByDay,
+    shiftType: shiftConfig.shiftType,
+    // Spelling out where the numbers came from — synced Clockify sessions, the built-in timer,
+    // or both — so a total that looks short has an obvious explanation.
+    syncSource: (clockifyId ? 'clockify' : settings.clockifyEnabled === false ? 'disabled' : 'unlinked') as 'clockify' | 'disabled' | 'unlinked',
+  };
+}
+
+const data = settings ? await loadMonth(settings) : null;
+---
+
+{settings && data
+  ? <DtrSheet settings={settings} viewUserId={viewUserId} month={month} year={year} isEditable={isEditable} isCoordinator={isCoordinator} data={data} />
+  : <p class="session-ended">Your session has ended. <a href="/">Sign in again</a> to see this DTR.</p>}
+
+<script is:inline>
+  // Tells the page script (grid editing, export names, tour) that a sheet just landed.
+  window.__dtrSheetReady = true;
+  document.dispatchEvent(new Event('dtr:sheet-ready'));
+</script>
+
+<style>
+  .session-ended { color: var(--text-secondary); font-size: 14px; text-align: center; }
+  .session-ended a { color: var(--ntv-orange); font-weight: 700; }
+</style>

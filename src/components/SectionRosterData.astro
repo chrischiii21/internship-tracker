@@ -1,0 +1,107 @@
+---
+// Server island for one section's roster on Manage Sections (server:defer in
+// pages/sections.astro): the page shell — section name, invite code — paints right away, and each
+// student's hours and full log (entries plus Clockify) arrive in this request. The logs back the
+// "View Student Progress" modal, so they're handed to the page as window.sectionStudentsLogs.
+import { getSession } from '../lib/auth';
+import { parse } from 'cookie';
+import { getAppSettings } from '../lib/settings';
+import { supabase } from '../lib/supabase';
+import { getStudentProgress, getClockifyUser, getClockifyDetailedEntries } from '../lib/clockify';
+import { getManualEntries } from '../lib/entries';
+import SectionRosterTable from './SectionRosterTable.astro';
+
+interface Props {
+  viewerId: string;
+  sectionId: string;
+}
+
+const { viewerId, sectionId } = Astro.props;
+
+// Per-user data: never let a shared cache hold on to it.
+Astro.response.headers.set('Cache-Control', 'private, no-store');
+
+const cookies = parse(Astro.request.headers.get('cookie') || '');
+const user = cookies.session ? await getSession(cookies.session) : null;
+const settings = user && user.id === viewerId ? await getAppSettings(user.id) : null;
+const allowed = settings?.role === 'coordinator';
+
+let filteredStudents: any[] = [];
+let sectionStudentsLogs: any[] = [];
+if (allowed) {
+  const { data: students } = await supabase
+    .from('student_settings')
+    .select('*, coordinator_sections(section_name)')
+    .eq('coordinator_id', viewerId)
+    .eq('section_id', sectionId);
+
+  // Sync hours and DTR progress (same logic as the coordinator page)
+  filteredStudents = await Promise.all((students || []).map(async (s) => {
+    const hours = await getStudentProgress(s.user_id, s.user_email, s.start_date);
+    const percent = Math.min(100, (hours / s.target_hours) * 100);
+    return {
+      ...s,
+      renderedHours: hours,
+      percent: percent.toFixed(1)
+    };
+  }));
+
+  // Fetch detailed logs for each student in the section
+  sectionStudentsLogs = await Promise.all(filteredStudents.map(async (s) => {
+    // 1. Fetch manual entries
+    const manual = await getManualEntries(s.user_id);
+
+    // 2. Fetch Clockify entries (if enabled)
+    let clockify: any[] = [];
+    if (s.clockify_enabled !== false) {
+      try {
+        const cUser = await getClockifyUser(s.user_email);
+        if (cUser) {
+          clockify = await getClockifyDetailedEntries(cUser.id, s.start_date);
+        }
+      } catch (err) {
+        console.error('Error fetching student Clockify logs in sections:', err);
+      }
+    }
+
+    // 3. Combine and sort entries by date + start_time descending
+    const combinedEntries = [
+      ...manual.map(m => ({ ...m, type: 'manual' })),
+      ...clockify.map(c => ({ ...c, type: 'clockify' }))
+    ].sort((a, b) => {
+      const dateA = new Date(`${a.date}T${a.startTime}`);
+      const dateB = new Date(`${b.date}T${b.startTime}`);
+      return dateB.getTime() - dateA.getTime();
+    });
+
+    return {
+      userId: s.user_id,
+      userName: s.user_name,
+      userPicture: s.user_picture,
+      program: s.program || 'N/A',
+      company: s.host_company || 'N/A',
+      startDate: s.start_date || 'N/A',
+      supervisor: s.supervisor || 'N/A',
+      supervisorPosition: s.supervisor_position || 'N/A',
+      renderedHours: s.renderedHours,
+      targetHours: s.target_hours,
+      percent: s.percent,
+      entries: combinedEntries
+    };
+  }));
+}
+---
+
+{allowed
+  ? <SectionRosterTable students={filteredStudents} />
+  : <p class="session-ended">Your session has ended. <a href="/">Sign in again</a> to see this section.</p>}
+
+<script define:vars={{ sectionStudentsLogs }}>
+  // The page's "View Student Progress" modal reads each student's details and logs from here.
+  window.sectionStudentsLogs = sectionStudentsLogs;
+</script>
+
+<style>
+  .session-ended { color: var(--text-secondary); font-size: 14px; }
+  .session-ended a { color: var(--ntv-orange); font-weight: 700; }
+</style>

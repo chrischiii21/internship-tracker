@@ -1,0 +1,31 @@
+---
+// Server island for the dashboard (server:defer in pages/dashboard.astro): the page shell paints
+// immediately and this arrives in its own request, so slow Supabase/Clockify reads only hold up
+// the stats. Being its own request, it checks the session itself instead of trusting props.
+import { getSession } from '../lib/auth';
+import { parse } from 'cookie';
+import { getAppSettings } from '../lib/settings';
+import DashboardStats from './DashboardStats.astro';
+
+interface Props {
+  wm?: string;
+}
+
+const { wm } = Astro.props;
+
+// Per-user data: never let a shared cache hold on to it.
+Astro.response.headers.set('Cache-Control', 'private, no-store');
+
+const cookies = parse(Astro.request.headers.get('cookie') || '');
+const user = cookies.session ? await getSession(cookies.session) : null;
+const settings = user ? await getAppSettings(user.id) : null;
+---
+
+{user && settings && settings.role !== 'coordinator'
+  ? <DashboardStats user={user} settings={settings} wm={wm} />
+  : <p class="session-ended">Your session has ended. <a href="/">Sign in again</a> to see your stats.</p>}
+
+<style>
+  .session-ended { color: var(--text-secondary); font-size: 14px; }
+  .session-ended a { color: var(--ntv-orange); font-weight: 700; }
+</style>

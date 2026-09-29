@@ -4,11 +4,11 @@ import Header from "../components/Header.astro";
 import Sidebar from "../components/Sidebar.astro";
 import { getSession } from "../lib/auth";
 import { parse } from "cookie";
-import { getClockifyUser, getDailyDTR } from "../lib/clockify";
+import AttendanceData from "../components/AttendanceData.astro";
+import AttendanceCalendar from "../components/AttendanceCalendar.astro";
 import { getAppSettings } from "../lib/settings";
-import { getManualEntries, getActiveTimer } from "../lib/entries";
 import { supabase } from "../lib/supabase";
-import { getMonthlyAttendance } from "../lib/attendance";
+import { getAttendanceConfig, getHolidays, DEFAULT_ATTENDANCE_CONFIG } from "../lib/attendance";
 
 const cookieHeader = Astro.request.headers.get("cookie") || "";
 const cookies = parse(cookieHeader);
@@ -77,64 +77,16 @@ const currentYear = now.getFullYear();
 const month = parseInt(Astro.url.searchParams.get("month") || currentMonth.toString());
 const year = parseInt(Astro.url.searchParams.get("year") || currentYear.toString());
 
-const isClockifySet = !!(
-  import.meta.env.CLOCKIFY_API_KEY && import.meta.env.CLOCKIFY_WORKSPACE_ID
-);
-
-const manual = await getManualEntries(viewUserId, viewIsEmployee);
-const manualFiltered = manual.filter((e) => {
-  const d = new Date(e.startFull || `${e.date}T${e.startTime}+08:00`);
-  return d.getMonth() + 1 === month && d.getFullYear() === year;
-});
-
-let clockifyId = "";
-if (isClockifySet && settings.clockifyEnabled !== false) {
-  try {
-    const clockifyUser = await getClockifyUser(settings.userEmail || "");
-    if (clockifyUser) clockifyId = clockifyUser.id;
-  } catch (e) {}
-}
-
-const dtrResult = await getDailyDTR(clockifyId, month, year, manualFiltered);
-const dailyTotals: Record<number, number> = {};
-for (const d of dtrResult.days) dailyTotals[parseInt(d.day)] = d.totalSeconds;
-
-// A running (not yet clocked out) timer has no `end`, so getDailyDTR never counts it into
-// dailyTotals — without this, today's cell sits blank while the intern is actively clocked in.
-const activeTimer = await getActiveTimer(viewUserId, viewIsEmployee);
-const ongoingDate = activeTimer
-  ? new Date(activeTimer.startTime).toLocaleDateString("en-CA", { timeZone: "Asia/Manila" })
-  : null;
-
-const { days, config, holidays } = await getMonthlyAttendance(viewUserId, viewIsEmployee, month, year, dailyTotals, ongoingDate);
-
-const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
-
 const monthName = new Date(year, month - 1)
   .toLocaleDateString("en-US", { month: "long", timeZone: "Asia/Manila" })
   .toUpperCase();
 
-const leadingBlanks = new Date(year, month - 1, 1).getDay();
 const weekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-const STATUS_LABELS: Record<string, string> = {
-  present: 'Present', absent: 'Absent', wfh: 'WFH', sl: 'Sick Leave', vl: 'Vacation Leave',
-};
-const shortMonth = new Date(year, month - 1).toLocaleDateString('en-US', { month: 'short' });
-
-// Consecutive days sharing a status and reason are one absence, not five separate rows — so a
-// three-day sick leave reads as "Sep 3–5" instead of repeating the same line three times.
-const reasonSpans: { from: number; to: number; status: string; reason: string; days: number }[] = [];
-for (const d of days) {
-  if (!d.reason) continue;
-  const last = reasonSpans[reasonSpans.length - 1];
-  if (last && last.status === d.status && last.reason === d.reason && d.day === last.to + 1) {
-    last.to = d.day;
-    last.days++;
-  } else {
-    reasonSpans.push({ from: d.day, to: d.day, status: d.status, reason: d.reason, days: 1 });
-  }
-}
+// The calendar settings dialog needs these up front; both are single quick reads.
+const [config, holidays] = isEditable
+  ? await Promise.all([getAttendanceConfig(viewUserId), getHolidays(viewUserId)])
+  : [DEFAULT_ATTENDANCE_CONFIG, []];
 ---
 
 <Layout title="Attendance Chart">
@@ -149,7 +101,7 @@ for (const d of days) {
       <div class="page-header">
         <h1>Attendance</h1>
         <p class="page-subtitle">
-          {settings.isEmployee ? "Employee" : "OJT"} attendance for {monthName} {year}
+          <span>{settings.isEmployee ? "Employee" : "OJT"} attendance for <span id="att-period">{monthName} {year}</span></span>
           {isReadOnly && <span class="readonly-pill">View only</span>}
         </p>
       </div>
@@ -224,46 +176,17 @@ for (const d of days) {
       </div>
 
       <div class="calendar-wrapper">
-        <div class="calendar-grid" id="calendar-grid">
-          {weekdayLabels.map((w) => <div class="weekday-header">{w}</div>)}
-          {Array.from({ length: leadingBlanks }).map(() => <div class="day-cell blank"></div>)}
-          {days.map((d) => (
-            <div
-              class={`day-cell status-${d.status} ${d.isHalfDay ? 'half-day' : ''} ${d.isUndertime ? 'undertime' : ''} ${d.isOngoing ? 'ongoing' : ''} ${isEditable ? 'editable' : (d.date <= todayStr ? 'viewable' : '')}`}
-              data-day={d.day}
-              data-date={d.date}
-              data-status={d.status}
-              data-half={d.isHalfDay ? '1' : '0'}
-              data-reason={d.reason || ''}
-              title={d.reason || undefined}
-            >
-              <span class="day-num">{d.day}</span>
-              {d.reason && <span class="cell-reason">{d.reason}</span>}
-              {d.isHoliday && <span class="holiday-dot" title={d.holidayLabel || 'Holiday'}></span>}
-              {d.isUndertime && <span class="undertime-badge" title="Undertime">UT</span>}
-              {d.totalSeconds > 0 && <span class="day-hours">{(d.totalSeconds / 3600).toFixed(1)}h</span>}
-            </div>
-          ))}
-        </div>
-
-        {reasonSpans.length > 0 && (
-          <section class="reason-summary">
-            <h2 class="reason-summary-title">Why these days were marked</h2>
-            <ul class="reason-list">
-              {reasonSpans.map(span => (
-                <li class="reason-item">
-                  <i class={`swatch ${span.status}`}></i>
-                  <span class="reason-dates">
-                    {shortMonth} {span.from}{span.to !== span.from ? `–${span.to}` : ''}
-                    {span.days > 1 && <span class="reason-daycount">{span.days} days</span>}
-                  </span>
-                  <span class="reason-status">{STATUS_LABELS[span.status] || span.status}</span>
-                  <span class="reason-text">{span.reason}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
+        <AttendanceData
+          server:defer
+          viewerId={user.id}
+          viewUserId={viewUserId}
+          viewIsEmployee={viewIsEmployee}
+          month={month}
+          year={year}
+          isEditable={isEditable}
+        >
+          <AttendanceCalendar slot="fallback" month={month} year={year} isEditable={isEditable} />
+        </AttendanceData>
       </div>
     </main>
   </div>
@@ -392,12 +315,18 @@ for (const d of days) {
   };
   const update = (e) => { window.location.href = buildUrl(e); };
 
-  // Switching month/year swaps just the calendar in place instead of reloading the whole page.
-  // The grid element itself stays (its click handlers live on it); only its cells are replaced.
+  // Switching month/year re-requests only the calendar's server island (with ?month=&year= added
+  // to its URL) and swaps it in, instead of reloading the whole page. Day clicks are handled on
+  // .calendar-wrapper, which stays put, so the new cells work straight away.
   const loadMonth = async (e) => {
     const url = buildUrl(e);
-    const grid = document.getElementById("calendar-grid");
+    const island = document.querySelector('link[rel="preload"][href*="/_server-islands/AttendanceData"]')?.getAttribute("href");
+    const current = document.getElementById("attendance-data");
     const wrapper = document.querySelector(".calendar-wrapper");
+    if (!island || !current) {
+      window.location.href = url;
+      return;
+    }
     // Selects stay locked until the new month lands, so two switches can't race each other.
     mSel.disabled = ySel.disabled = true;
     const hideLoader = window.showSectionLoading?.(
@@ -405,18 +334,14 @@ for (const d of days) {
       `Loading ${mSel.options[mSel.selectedIndex].text} ${ySel.value}`
     );
     try {
-      const res = await fetch(url);
-      if (!res.ok || res.redirected) throw new Error("fallback");
-      const doc = new DOMParser().parseFromString(await res.text(), "text/html");
-      const freshGrid = doc.getElementById("calendar-grid");
-      if (!grid || !wrapper || !freshGrid) throw new Error("fallback");
-      grid.replaceChildren(...freshGrid.childNodes);
-      wrapper.querySelector(".reason-summary")?.remove();
-      const freshReasons = doc.querySelector(".calendar-wrapper .reason-summary");
-      if (freshReasons) wrapper.append(freshReasons);
-      const subtitle = document.querySelector(".page-subtitle");
-      const freshSubtitle = doc.querySelector(".page-subtitle");
-      if (subtitle && freshSubtitle) subtitle.replaceChildren(...freshSubtitle.childNodes);
+      const res = await fetch(`${island}&month=${mSel.value}&year=${ySel.value}`);
+      if (!res.ok) throw new Error("fallback");
+      const fresh = document.createRange().createContextualFragment(await res.text());
+      const freshData = fresh.getElementById("attendance-data");
+      if (!freshData) throw new Error("fallback");
+      current.replaceWith(fresh);
+      const period = document.getElementById("att-period");
+      if (period) period.textContent = freshData.dataset.period;
       history.replaceState(null, "", url);
     } catch {
       window.location.href = url;
@@ -533,7 +458,7 @@ for (const d of days) {
     document.getElementById("day-details-close")?.addEventListener("click", closeDayDetails);
     detailsModal?.addEventListener("click", (e) => { if (e.target === detailsModal) closeDayDetails(); });
 
-    document.getElementById("calendar-grid")?.addEventListener("click", (e) => {
+    document.querySelector(".calendar-wrapper")?.addEventListener("click", (e) => {
       const cell = e.target.closest(".day-cell.viewable");
       if (!cell) return;
       detailsModal.classList.add("active");
@@ -633,7 +558,7 @@ for (const d of days) {
       endDateInput.value = '';
     };
 
-    document.getElementById("calendar-grid")?.addEventListener("click", (e) => {
+    document.querySelector(".calendar-wrapper")?.addEventListener("click", (e) => {
       const cell = e.target.closest(".day-cell.editable");
       if (!cell) return;
       if (activeCell === cell && !popover.classList.contains("hidden")) {
@@ -896,103 +821,6 @@ for (const d of days) {
   .swatch.ongoing { background: var(--att-cell-empty); border: 2px solid #60a5fa; box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.25); }
 
   .calendar-wrapper { max-width: 900px; margin: 0 auto; }
-  .calendar-grid {
-    display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px;
-    background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-subtle);
-    border-radius: 14px; padding: 16px;
-  }
-  .weekday-header { text-align: center; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-secondary); padding-bottom: 6px; }
-
-  .day-cell {
-    position: relative; min-height: 64px; border-radius: 8px; padding: 6px 8px;
-    display: flex; flex-direction: column; justify-content: space-between;
-    font-size: 11px; color: var(--text-primary);
-  }
-  .day-cell.blank { background: transparent; }
-  .day-num { font-size: 13px; font-weight: 700; }
-  .day-hours { font-size: 10px; opacity: 0.85; align-self: flex-end; }
-  .holiday-dot { position: absolute; top: 6px; right: 8px; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-  /* The reason reads straight off the cell — a hover tooltip is no use on a phone. */
-  .cell-reason {
-    font-size: 9px; line-height: 1.25; opacity: .9; margin-top: 2px;
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
-    overflow: hidden; word-break: break-word;
-  }
-
-  .reason-summary {
-    max-width: 900px; margin: 20px auto 0; padding: 18px 20px;
-    background: var(--card-bg); border: 1px solid var(--border-subtle); border-radius: 14px;
-  }
-  .reason-summary-title {
-    font-size: 13px; font-weight: 700; color: var(--text-primary);
-    margin-bottom: 14px; letter-spacing: .01em;
-  }
-  .reason-list { list-style: none; display: flex; flex-direction: column; gap: 10px; }
-  .reason-item {
-    display: grid; grid-template-columns: 12px 130px 92px 1fr; align-items: baseline; gap: 12px;
-    font-size: 12.5px; color: var(--text-secondary);
-  }
-  .reason-item .swatch { align-self: center; }
-  .reason-dates { display: flex; align-items: baseline; gap: 7px; font-weight: 700; color: var(--text-primary); white-space: nowrap; }
-  .reason-daycount {
-    font-size: 9.5px; font-weight: 700; color: var(--text-secondary);
-    background: rgba(127,127,127,.12); padding: 2px 6px; border-radius: 5px;
-  }
-  .reason-status { font-weight: 600; color: var(--text-secondary); white-space: nowrap; }
-  .reason-text { color: var(--text-primary); }
-
-  @media (max-width: 700px) {
-    .reason-item { grid-template-columns: 12px 1fr; row-gap: 3px; }
-    .reason-status, .reason-text { grid-column: 2; }
-  }
-  .undertime-badge {
-    position: absolute; bottom: 6px; left: 8px; font-size: 8px; font-weight: 800;
-    letter-spacing: .02em; padding: 1px 4px; border-radius: 4px;
-    background: rgba(5, 11, 22, 0.35); color: inherit;
-  }
-
-  .day-cell.editable, .day-cell.viewable { cursor: pointer; transition: transform 0.15s; }
-  .day-cell.editable:hover, .day-cell.viewable:hover { transform: translateY(-1px); box-shadow: 0 4px 10px rgba(0,0,0,0.25); }
-
-  /* A separate overlay element (not a class on the cell itself) so it survives the cell's
-     className being fully replaced mid-request when the new status is applied. */
-  .cell-spinner-overlay {
-    position: absolute; inset: 0; z-index: 2; border-radius: inherit;
-    display: flex; align-items: center; justify-content: center;
-    background: rgba(5, 11, 22, 0.45);
-  }
-  .cell-spinner-overlay::after {
-    content: ''; width: 14px; height: 14px;
-    border: 2px solid rgba(255, 255, 255, 0.3); border-top-color: #fff;
-    border-radius: 50%; animation: btn-spin 0.6s linear infinite;
-  }
-
-  .day-cell.status-present, .day-cell.status-absent, .day-cell.status-wfh, .day-cell.status-sl, .day-cell.status-vl {
-    color: #050b16;
-  }
-  .day-cell.status-present { background: var(--att-present); }
-  .day-cell.status-absent { background: var(--att-absent); }
-  .day-cell.status-wfh { background: var(--att-wfh); }
-  .day-cell.status-sl { background: var(--att-sl); }
-  .day-cell.status-vl { background: var(--att-vl); color: #fff; }
-
-  .day-cell.status-present.half-day { background: linear-gradient(135deg, var(--att-present) 50%, var(--att-cell-empty) 50%); color: var(--text-primary); }
-  .day-cell.status-absent.half-day { background: linear-gradient(135deg, var(--att-absent) 50%, var(--att-cell-empty) 50%); color: var(--text-primary); }
-  .day-cell.status-wfh.half-day { background: linear-gradient(135deg, var(--att-wfh) 50%, var(--att-cell-empty) 50%); color: var(--text-primary); }
-  .day-cell.status-sl.half-day { background: linear-gradient(135deg, var(--att-sl) 50%, var(--att-cell-empty) 50%); color: var(--text-primary); }
-  .day-cell.status-vl.half-day { background: linear-gradient(135deg, var(--att-vl) 50%, var(--att-cell-empty) 50%); color: var(--text-primary); }
-
-  .day-cell.status-non-working { background: var(--att-nonworking-bg); color: var(--att-nonworking-text); }
-  .day-cell.status-unmarked { background: var(--att-cell-empty); border: 1px dashed var(--border-subtle); }
-
-  /* Today's cell while a timer is actively running — no logged time yet, so the status colors
-     above don't apply, but a blank cell would read as "not present" while clocked in. */
-  .day-cell.ongoing { box-shadow: 0 0 0 2px #60a5fa; animation: ongoing-pulse 2s ease-in-out infinite; }
-  @keyframes ongoing-pulse {
-    0%, 100% { box-shadow: 0 0 0 2px #60a5fa; }
-    50% { box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.4); }
-  }
-
   /* Status popover */
   .status-popover {
     position: fixed; z-index: 3000; background: var(--modal-bg); border: 1px solid var(--border-subtle);
@@ -1025,7 +853,7 @@ for (const d of days) {
     padding: 12px 16px; background: rgba(255, 255, 255, 0.02); border-bottom: 1px solid var(--border-subtle);
   }
   .popover-date { display: flex; align-items: center; gap: 8px; }
-  /* :global() on every selector below that targets markup built in the <script> via innerHTML /
+  /* :global() on every selector below that targets markup built in the page script via innerHTML /
      createElement — that markup never gets Astro's data-astro-cid attribute, so scoped rules miss it. */
   :global(.popover-date-text) { font-size: 13px; font-weight: 700; color: var(--text-primary); }
   :global(.popover-status-badge) {
@@ -1188,7 +1016,6 @@ for (const d of days) {
 
   @media (max-width: 900px) {
     #portal-main { margin-left: 0; padding: 24px 16px; width: 100%; overflow-x: hidden; }
-    .day-cell { min-height: 52px; }
   }
 
   @media (max-width: 768px) {
@@ -1201,18 +1028,6 @@ for (const d of days) {
   }
 
   @media (max-width: 600px) {
-    .calendar-grid { gap: 4px; padding: 8px; }
-    .weekday-header { font-size: 9px; padding-bottom: 4px; }
-    .day-cell { min-height: 46px; padding: 4px; font-size: 9px; border-radius: 6px; }
-    .day-num { font-size: 11px; }
-    .day-hours { font-size: 8px; }
-    .holiday-dot { top: 4px; right: 4px; width: 5px; height: 5px; }
-    /* Collapse the "UT" text badge into a small dot so it doesn't collide with the hours label in a ~46px cell */
-    .undertime-badge {
-      font-size: 0; width: 6px; height: 6px; min-width: 0; padding: 0; border-radius: 50%;
-      bottom: 4px; left: 4px;
-    }
-
     #popover-edit-section { padding: 12px; }
     .status-btn { padding: 10px 8px; font-size: 12px; }
     .popover-clear-btn, .popover-close-btn { padding: 10px; }
@@ -1223,11 +1038,6 @@ for (const d of days) {
     #holiday-date-input { flex: 1 1 100%; }
     #holiday-label-input { flex: 1 1 auto; }
     .holiday-add-btn { flex: 0 0 auto; }
-  }
-
-  @media (max-width: 380px) {
-    .day-cell { min-height: 42px; }
-    .day-hours { display: none; }
   }
 </style>
 

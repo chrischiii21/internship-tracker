@@ -1,0 +1,913 @@
+---
+// The Time Tracker's activity log: entries from this system and Clockify, attendance-only days,
+// grouped by month / week / day and paginated. Rendered inside the TrackerData server island,
+// after the page shell (filters, total box, Manual Adjustment form) has already painted.
+import { getManualEntries, getActiveTimer } from '../lib/entries';
+import { getClockifyUser, getClockifyDetailedEntries } from '../lib/clockify';
+import { formatHours } from '../lib/utils';
+import { getOverridesInRange } from '../lib/attendance';
+import type { AppSettings } from '../lib/settings';
+
+interface Props {
+  user: { id: string; email: string };
+  settings: AppSettings;
+  startDate?: string;
+  endDate?: string;
+  source?: string;
+  page?: string;
+}
+
+const { user, settings, startDate, endDate, source, page } = Astro.props;
+
+const activeStartDate = settings.isEmployee ? (settings.employeeStartDate || settings.startDate) : settings.startDate;
+
+let userInClockify = false;
+let clockifyEntries: any[] = [];
+// Clockify is a separate API, so it loads while the Supabase work below runs; awaited before use.
+const clockifyLoad = (async () => {
+  if (settings.clockifyEnabled === false) return;
+  try {
+    if (import.meta.env.CLOCKIFY_API_KEY) {
+      const clockifyUser = await getClockifyUser(user.email);
+      if (clockifyUser) {
+        userInClockify = true;
+        clockifyEntries = await getClockifyDetailedEntries(clockifyUser.id, activeStartDate);
+      }
+    }
+  } catch (e) {
+    userInClockify = false;
+  }
+})();
+
+// Must run before getManualEntries: it can promote an open DTR punch-in out of `entries`.
+const activeTimer = await getActiveTimer(user.id, settings.isEmployee);
+const manualEntries = await getManualEntries(user.id, settings.isEmployee);
+await clockifyLoad;
+
+const startDateParam = startDate || '';
+const endDateParam = endDate || '';
+const sourceParam = source || 'all';
+
+// The running session only becomes an `entries` row on Time Out, so show it as a live row until then.
+const runningEntries = activeTimer ? (() => {
+  const start = new Date(activeTimer.startTime);
+  const now = new Date();
+  const timeStr = (d: Date) => d.toLocaleTimeString('en-GB', { timeZone: 'Asia/Manila', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  return [{
+    id: 'running',
+    userId: user.id,
+    description: activeTimer.description || 'Present',
+    date: start.toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' }),
+    startTime: timeStr(start),
+    endTime: timeStr(now),
+    durationSeconds: Math.max(0, Math.floor((now.getTime() - start.getTime()) / 1000)),
+    startFull: activeTimer.startTime,
+    endFull: now.toISOString(),
+    documentationUrls: [] as string[],
+    type: 'running' as const,
+  }];
+})() : [];
+
+// Merge manual entries and Clockify entries
+const realEntries = [
+  ...runningEntries,
+  ...manualEntries.map(e => ({ ...e, type: 'manual' as const })),
+  ...clockifyEntries.map(e => ({ ...e, type: 'clockify' as const }))
+];
+
+// Days marked in the Attendance Chart with no actual time logged yet still show up here as their
+// own log entries instead of a separate reminder banner. Present/WFH are "actionable" (you claimed
+// you worked, log the real hours); Absent/SL/VL are informational only — no log is expected for those.
+const todayManila = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
+const attendanceRangeStart = startDateParam || activeStartDate || todayManila;
+const attendanceRangeEnd = endDateParam && endDateParam < todayManila ? endDateParam : todayManila;
+const statusLabels: Record<string, string> = { absent: 'Absent', wfh: 'WFH', sl: 'Sick Leave', vl: 'Vacation Leave', present: 'Present' };
+const ACTIONABLE_STATUSES = new Set(['present', 'wfh']);
+
+let attendanceEntries: any[] = [];
+if (attendanceRangeStart <= attendanceRangeEnd) {
+  const attendanceOverrides = await getOverridesInRange(user.id, settings.isEmployee ?? false, attendanceRangeStart, attendanceRangeEnd);
+  const loggedDates = new Set(realEntries.map(e => e.date));
+  attendanceEntries = attendanceOverrides
+    .filter(o => !loggedDates.has(o.date))
+    .map(o => {
+      const isActionable = ACTIONABLE_STATUSES.has(o.status);
+      return {
+        id: `attendance-${o.date}`,
+        userId: user.id,
+        description: isActionable
+          ? `Marked ${statusLabels[o.status] || o.status} in Attendance Chart`
+          : `${statusLabels[o.status] || o.status}`,
+        date: o.date,
+        startTime: '00:00',
+        endTime: '00:00',
+        durationSeconds: 0,
+        startFull: `${o.date}T00:00:00+08:00`,
+        endFull: `${o.date}T00:00:00+08:00`,
+        documentationUrls: [] as string[],
+        type: 'attendance' as const,
+        attendanceStatus: o.status,
+        isActionable,
+      };
+    });
+}
+
+const allEntries = [...realEntries, ...attendanceEntries];
+
+let filteredEntries = allEntries;
+if (startDateParam) {
+  filteredEntries = filteredEntries.filter(e => e.date >= startDateParam);
+}
+if (endDateParam) {
+  filteredEntries = filteredEntries.filter(e => e.date <= endDateParam);
+}
+if (sourceParam === 'manual') {
+  filteredEntries = filteredEntries.filter(e => e.type === 'manual' || e.type === 'running');
+} else if (sourceParam === 'clockify') {
+  filteredEntries = filteredEntries.filter(e => e.type === 'clockify');
+}
+
+const totalSeconds = filteredEntries.reduce((acc, e) => acc + e.durationSeconds, 0);
+
+// Group entries by Month and Date
+const sortedEntries = [...filteredEntries].sort((a, b) => {
+  const dateCompare = b.date.localeCompare(a.date);
+  if (dateCompare !== 0) return dateCompare;
+  return b.startTime.localeCompare(a.startTime);
+});
+
+// Pagination setup
+const pageSize = 15;
+const pageParam = parseInt(page || '1', 10);
+const totalEntriesCount = sortedEntries.length;
+const totalPages = Math.ceil(totalEntriesCount / pageSize);
+const currentPage = Math.max(1, Math.min(pageParam, totalPages || 1));
+
+const paginatedEntries = totalEntriesCount > 0
+  ? sortedEntries.slice((currentPage - 1) * pageSize, currentPage * pageSize)
+  : [];
+
+const getWeekRangeLabel = (dateStr: string) => {
+  const dateObj = new Date(dateStr + 'T00:00:00+08:00');
+  const day = dateObj.getDay(); // 0 = Sunday, 1 = Monday, ... 6 = Saturday
+  
+  // Calculate Monday of the week
+  const monday = new Date(dateObj);
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+  monday.setDate(dateObj.getDate() + diffToMonday);
+  
+  // Calculate Sunday of the week
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  
+  const options: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', timeZone: 'Asia/Manila' };
+  const startStr = monday.toLocaleDateString('en-US', options);
+  const endStr = sunday.toLocaleDateString('en-US', options);
+  
+  const yyyy = monday.getFullYear();
+  const mm = String(monday.getMonth() + 1).padStart(2, '0');
+  const dd = String(monday.getDate()).padStart(2, '0');
+  const key = `${yyyy}-${mm}-${dd}`;
+  
+  return {
+    key,
+    label: `Week of ${startStr} – ${endStr}, ${yyyy}`
+  };
+};
+
+interface DateGroup {
+  dateKey: string;
+  dateDisplay: string;
+  totalSeconds: number;
+  entries: typeof allEntries;
+  hasRunning?: boolean;
+}
+
+interface WeekGroup {
+  weekKey: string;
+  weekDisplay: string;
+  totalSeconds: number;
+  dateGroups: DateGroup[];
+  hasRunning?: boolean;
+}
+
+interface MonthGroup {
+  monthKey: string; // YYYY-MM
+  monthName: string;
+  totalSeconds: number;
+  weekGroups: WeekGroup[];
+  hasRunning?: boolean;
+}
+
+const monthsMap = new Map<string, MonthGroup>();
+
+for (const entry of paginatedEntries) {
+  const monthKey = entry.date.substring(0, 7); // "YYYY-MM"
+  const dateKey = entry.date; // "YYYY-MM-DD"
+  const { key: weekKey, label: weekDisplay } = getWeekRangeLabel(entry.date);
+
+  // 1. Resolve Month Group
+  if (!monthsMap.has(monthKey)) {
+    const [year, month] = monthKey.split('-');
+    const monthNames = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
+    ];
+    const monthName = `${monthNames[parseInt(month, 10) - 1]} ${year}`;
+    monthsMap.set(monthKey, {
+      monthKey,
+      monthName,
+      totalSeconds: 0,
+      weekGroups: []
+    });
+  }
+
+  const monthGroup = monthsMap.get(monthKey)!;
+  monthGroup.totalSeconds += entry.durationSeconds;
+
+  // 2. Resolve Week Group within Month
+  let weekGroup = monthGroup.weekGroups.find(wg => wg.weekKey === weekKey);
+  if (!weekGroup) {
+    weekGroup = {
+      weekKey,
+      weekDisplay,
+      totalSeconds: 0,
+      dateGroups: []
+    };
+    monthGroup.weekGroups.push(weekGroup);
+  }
+  weekGroup.totalSeconds += entry.durationSeconds;
+
+  // 3. Resolve Date Group within Week
+  let dateGroup = weekGroup.dateGroups.find(dg => dg.dateKey === dateKey);
+  if (!dateGroup) {
+    const dateObj = new Date(entry.date + 'T00:00:00+08:00');
+    const options: Intl.DateTimeFormatOptions = { 
+      weekday: 'long', 
+      month: 'short', 
+      day: 'numeric', 
+      timeZone: 'Asia/Manila' 
+    };
+    const dateDisplay = dateObj.toLocaleDateString('en-US', options);
+
+    dateGroup = {
+      dateKey,
+      dateDisplay,
+      totalSeconds: 0,
+      entries: []
+    };
+    weekGroup.dateGroups.push(dateGroup);
+  }
+
+  dateGroup.entries.push(entry);
+  dateGroup.totalSeconds += entry.durationSeconds;
+  if (entry.type === 'running') monthGroup.hasRunning = weekGroup.hasRunning = dateGroup.hasRunning = true;
+}
+
+const groupedEntries = Array.from(monthsMap.values()).sort((a, b) => b.monthKey.localeCompare(a.monthKey));
+
+groupedEntries.forEach(monthGroup => {
+  monthGroup.weekGroups.sort((a, b) => b.weekKey.localeCompare(a.weekKey));
+  monthGroup.weekGroups.forEach(weekGroup => {
+    weekGroup.dateGroups.sort((a, b) => b.dateKey.localeCompare(a.dateKey));
+  });
+});
+
+const formatTo24hr = (timeStr: string) => {
+  if (!timeStr) return '';
+  const parts = timeStr.split(':').map(Number);
+  return parts.map(p => String(p).padStart(2, '0')).join(':');
+};
+
+// Entries within a day are displayed latest-first. When two consecutive real time entries (not
+// attendance markers) have a gap between them, surface it as an informational "Break" divider —
+// no categorization (lunch vs BRB etc.), since that depends on the person and isn't tracked.
+const getBreakMinutes = (laterEntry: any, earlierEntry: any): number => {
+  if (!laterEntry || !earlierEntry) return 0;
+  if (laterEntry.type === 'attendance' || earlierEntry.type === 'attendance') return 0;
+  const laterStart = new Date(laterEntry.startFull).getTime();
+  const earlierEnd = new Date(earlierEntry.endFull).getTime();
+  if (isNaN(laterStart) || isNaN(earlierEnd)) return 0;
+  const gapMs = laterStart - earlierEnd;
+  return gapMs > 60000 ? Math.round(gapMs / 60000) : 0;
+};
+
+const formatBreakDuration = (minutes: number): string => {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+};
+---
+
+<div
+  id="tracker-data"
+  data-total-label={formatHours(totalSeconds / 3600)}
+  data-total-seconds={totalSeconds}
+  data-has-running={filteredEntries.some(e => e.type === 'running') ? '1' : undefined}
+  data-in-clockify={userInClockify ? '1' : undefined}
+>
+                <div class="log-list">
+                  {groupedEntries.length > 0 ? groupedEntries.map(group => (
+                    <div class="month-group">
+                      <div class="month-header">
+                        <span class="month-name">{group.monthName}</span>
+                        <div class="month-header-right">
+                          <span class="month-hours" data-live-base={group.hasRunning ? group.totalSeconds : undefined}>{formatHours(group.totalSeconds / 3600)}</span>
+                          <button
+                            type="button"
+                            class="ai-summary-trigger ai-btn-monthly"
+                            title="Generate Monthly AI Journal Summary"
+                            data-type="month"
+                            data-label={group.monthName}
+                            data-entries={JSON.stringify(group.weekGroups.flatMap(wg => wg.dateGroups.flatMap(dg => dg.entries.map(e => ({ date: e.date, description: e.description, durationSeconds: e.durationSeconds })))))}
+                          >
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                              <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
+                            </svg>
+                            AI Summary
+                          </button>
+                        </div>
+                      </div>
+                      <div class="month-weeks">
+                        {group.weekGroups.map(weekGroup => (
+                          <div class="week-group">
+                            <div class="week-header">
+                              <span class="week-name">{weekGroup.weekDisplay}</span>
+                              <div class="week-header-right">
+                                <span class="week-hours" data-live-base={weekGroup.hasRunning ? weekGroup.totalSeconds : undefined}>{formatHours(weekGroup.totalSeconds / 3600)}</span>
+                                <button
+                                  type="button"
+                                  class="ai-summary-trigger ai-btn-weekly"
+                                  title="Generate Weekly AI Journal Summary"
+                                  data-type="week"
+                                  data-label={weekGroup.weekDisplay}
+                                  data-entries={JSON.stringify(weekGroup.dateGroups.flatMap(dg => dg.entries.map(e => ({ date: e.date, description: e.description, durationSeconds: e.durationSeconds }))))}
+                                >
+                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
+                                  </svg>
+                                  AI Summary
+                                </button>
+                              </div>
+                            </div>
+                            <div class="week-dates">
+                              {weekGroup.dateGroups.map(dateGroup => (
+                                <div class="date-group-card">
+                                  <div class="date-group-header">
+                                    <span class="date-group-title">{dateGroup.dateDisplay}</span>
+                                    <div class="date-group-header-right">
+                                      <span class="date-group-hours" data-live-base={dateGroup.hasRunning ? dateGroup.totalSeconds : undefined}>{formatHours(dateGroup.totalSeconds / 3600)}</span>
+                                      <button
+                                        type="button"
+                                        class="ai-summary-trigger ai-btn-daily"
+                                        title="Generate Daily AI Journal Summary"
+                                        data-type="day"
+                                        data-label={dateGroup.dateDisplay}
+                                        data-entries={JSON.stringify(dateGroup.entries.map(e => ({ date: e.date, description: e.description, durationSeconds: e.durationSeconds })))}
+                                      >
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                          <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1 1.275-1.275L12 3Z"/>
+                                        </svg>
+                                      </button>
+                                    </div>
+                                  </div>
+                                  <div class="shift-list">
+                                    {dateGroup.entries.map((entry, entryIdx) => (
+                                      <>
+                                      {entry.type === 'running' ? (
+                                        <div class="shift-item running-item">
+                                          <div class="shift-info">
+                                            <div class="shift-title-row">
+                                              <span class="shift-title">{entry.description}</span>
+                                              <span class="source-badge running"><span class="running-dot"></span>Running</span>
+                                            </div>
+                                            <div class="shift-sub">
+                                              <span class="time">{formatTo24hr(entry.startTime)} — now</span>
+                                            </div>
+                                          </div>
+                                          <div class="shift-actions">
+                                            <span class="shift-hours" data-live-base={entry.durationSeconds}>{formatHours(entry.durationSeconds / 3600)}</span>
+                                          </div>
+                                        </div>
+                                      ) : entry.type === 'attendance' ? (
+                                        <div class={`shift-item attendance-marker-item ${entry.isActionable ? 'actionable' : 'informational'}`}>
+                                          <div class="shift-info">
+                                            <div class="shift-title-row">
+                                              <span class="shift-title">{entry.description}</span>
+                                              <span class={`source-badge attendance status-${entry.attendanceStatus}`}>
+                                                {entry.isActionable ? 'No time log' : statusLabels[entry.attendanceStatus] || entry.attendanceStatus}
+                                              </span>
+                                            </div>
+                                            <div class="shift-sub">
+                                              <span class="time attendance-hint">
+                                                {entry.isActionable ? 'Log the actual hours worked, if any' : 'No time log expected'}
+                                              </span>
+                                            </div>
+                                          </div>
+                                          {entry.isActionable && (
+                                            <div class="shift-actions">
+                                              <button
+                                                type="button"
+                                                class="log-time-btn"
+                                                data-date={entry.date}
+                                                data-status={statusLabels[entry.attendanceStatus] || entry.attendanceStatus}
+                                              >
+                                                Log time
+                                              </button>
+                                            </div>
+                                          )}
+                                        </div>
+                                      ) : (
+                                        <div class="shift-item">
+                                          <div class="shift-info">
+                                            <div class="shift-title-row">
+                                              <span class="shift-title">{entry.description || 'General Work'}</span>
+                                              {userInClockify && (
+                                                <span class={`source-badge ${entry.type}`}>
+                                                  {entry.type === 'clockify' ? 'Clockify' : 'Manual'}
+                                                </span>
+                                              )}
+                                              {entry.documentationUrls && entry.documentationUrls.length > 0 && (
+                                                <span class="proof-badge" title={`${entry.documentationUrls.length} image proof files attached`}>
+                                                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-right: 4px; display: inline-block; vertical-align: middle;"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                                                  {entry.documentationUrls.length}
+                                                </span>
+                                              )}
+                                            </div>
+                                            <div class="shift-sub">
+                                              <span class="time">{formatTo24hr(entry.startTime)} — {formatTo24hr(entry.endTime)}</span>
+                                            </div>
+                                          </div>
+                                          <div class="shift-actions">
+                                            <span class="shift-hours">{formatHours(entry.durationSeconds / 3600)}</span>
+                                            <div class="action-group">
+                                              <button
+                                                type="button"
+                                                class="info-icon-btn"
+                                                title="View Details & Proof"
+                                                data-id={entry.id}
+                                                data-desc={entry.description || 'General Work'}
+                                                data-date={entry.date}
+                                                data-start={entry.startTime}
+                                                data-end={entry.endTime}
+                                                data-urls={JSON.stringify(entry.documentationUrls || [])}
+                                                data-type={entry.type}
+                                              >
+                                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+                                              </button>
+                                            </div>
+                                          </div>
+                                        </div>
+                                      )}
+                                      {(() => {
+                                        const gapMin = getBreakMinutes(entry, dateGroup.entries[entryIdx + 1]);
+                                        return gapMin > 0 ? (
+                                          <div class="break-divider">
+                                            <span class="break-divider-line"></span>
+                                            <span class="break-divider-label">Break — {formatBreakDuration(gapMin)}</span>
+                                            <span class="break-divider-line"></span>
+                                          </div>
+                                        ) : null;
+                                      })()}
+                                      </>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )) : (
+                    <div class="empty-list">No activity logs found for the selected filter.</div>
+                  )}
+                </div>
+                
+                {totalPages > 1 && (
+                  <div class="pagination-controls">
+                    <button 
+                      type="button"
+                      class="pagination-btn"
+                      disabled={currentPage <= 1}
+                      onclick={`window.changePage(${currentPage - 1})`}
+                      title="Previous Page"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+                    </button>
+                    
+                    <span class="pagination-info">
+                      Page <strong>{currentPage}</strong> of <strong>{totalPages}</strong> ({totalEntriesCount} logs)
+                    </span>
+                    
+                    <button 
+                      type="button"
+                      class="pagination-btn"
+                      disabled={currentPage >= totalPages}
+                      onclick={`window.changePage(${currentPage + 1})`}
+                      title="Next Page"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+                    </button>
+                  </div>
+                )}
+</div>
+
+<script is:inline>
+  // Tells the page script (total box, Clockify-only UI, list buttons, live ticker) that a list just landed.
+  window.__trackerDataReady = true;
+  document.dispatchEvent(new Event('tracker:data-ready'));
+</script>
+
+<style>
+  .log-list { 
+    display: flex; 
+    flex-direction: column; 
+    gap: 0; 
+    max-height: 420px; 
+    overflow-y: auto;
+    padding-right: 8px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+  }
+  .log-list::-webkit-scrollbar {
+    width: 6px;
+  }
+  .log-list::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .log-list::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+  }
+  .log-list::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.2);
+  }
+  .date-group-card {
+    background: rgba(5, 11, 22, 0.6);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    margin-bottom: 16px;
+    overflow: hidden;
+    transition: border-color 0.2s;
+  }
+  .date-group-card:last-child {
+    margin-bottom: 0;
+  }
+  .date-group-card:hover {
+    border-color: rgba(237, 102, 33, 0.2);
+  }
+  .date-group-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.02);
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .date-group-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: white;
+  }
+  .date-group-hours {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--ntv-orange);
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .shift-list {
+    display: flex;
+    flex-direction: column;
+  }
+  .shift-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 20px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    transition: background-color 0.15s;
+  }
+  .shift-item:last-child {
+    border-bottom: none;
+  }
+  .shift-item:hover {
+    background: rgba(237, 102, 33, 0.03);
+  }
+  .break-divider {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 20px;
+  }
+  .break-divider-line {
+    flex: 1;
+    height: 1px;
+    background: repeating-linear-gradient(90deg, rgba(255,255,255,0.12) 0, rgba(255,255,255,0.12) 4px, transparent 4px, transparent 8px);
+  }
+  .break-divider-label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+    opacity: 0.7;
+    white-space: nowrap;
+  }
+  .shift-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: white;
+    display: block;
+    margin-bottom: 4px;
+  }
+  .shift-sub {
+    font-size: 11px;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .shift-actions {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+  .shift-hours {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--ntv-orange);
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .month-group {
+    margin-bottom: 28px;
+  }
+  .month-group:last-child {
+    margin-bottom: 0;
+  }
+  .month-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    margin-bottom: 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  }
+  .month-name {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .month-hours {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--ntv-orange);
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .month-weeks {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .week-group {
+    background: rgba(255, 255, 255, 0.01);
+    border: 1px dashed rgba(255, 255, 255, 0.06);
+    border-radius: 14px;
+    padding: 16px;
+  }
+  .week-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 12px;
+    margin-bottom: 14px;
+    border-bottom: 1px dashed rgba(255, 255, 255, 0.06);
+  }
+  .week-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .week-name::before {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: var(--ntv-orange);
+    opacity: 0.8;
+  }
+  .week-hours {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .week-dates {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .week-dates .date-group-card {
+    margin-bottom: 0;
+  }
+  .month-header-right, .week-header-right, .date-group-header-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .ai-summary-trigger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    background: rgba(237, 102, 33, 0.06);
+    border: 1px solid rgba(237, 102, 33, 0.15);
+    border-radius: 6px;
+    color: var(--ntv-orange);
+    cursor: pointer;
+    font-family: 'Outfit', sans-serif;
+    font-weight: 600;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .ai-summary-trigger:hover {
+    background: rgba(237, 102, 33, 0.15);
+    border-color: rgba(237, 102, 33, 0.4);
+    transform: translateY(-1px);
+    box-shadow: 0 0 12px rgba(237, 102, 33, 0.1);
+  }
+  .ai-summary-trigger:active {
+    transform: translateY(0);
+  }
+  .ai-btn-monthly, .ai-btn-weekly {
+    padding: 4px 10px;
+    font-size: 11px;
+  }
+  .ai-btn-daily {
+    padding: 0;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    color: var(--text-secondary);
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+  }
+  .ai-btn-daily:hover {
+    color: var(--ntv-orange);
+    background: rgba(237, 102, 33, 0.08);
+    border-color: rgba(237, 102, 33, 0.25);
+  }
+  .action-group { display: flex; align-items: center; gap: 8px; }
+  .delete-icon, .edit-icon, :global(.info-icon-btn) { background: none; border: none; cursor: pointer; opacity: 0.4; transition: 0.2s; padding: 4px; display: flex; align-items: center; }
+  .edit-icon, :global(.info-icon-btn) { color: var(--text-secondary); }
+  .delete-icon:hover, .edit-icon:hover, :global(.info-icon-btn:hover) { opacity: 1; transform: scale(1.1); }
+  .edit-icon:hover, :global(.info-icon-btn:hover) { color: var(--ntv-orange); }
+  .proof-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(237, 102, 33, 0.06);
+    border: 1px solid rgba(237, 102, 33, 0.25);
+    color: var(--ntv-orange);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    margin-left: 8px;
+    vertical-align: middle;
+  }
+@media (max-width: 900px) {
+    .shift-item { flex-direction: column; align-items: flex-start; gap: 16px; }
+    .shift-actions { width: 100%; justify-content: space-between; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 12px; }
+  }
+  .attendance-marker-item.actionable {
+    background: rgba(251, 191, 36, 0.05);
+    border: 1px dashed rgba(251, 191, 36, 0.3);
+    border-radius: 10px;
+  }
+  .attendance-marker-item.informational {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px dashed var(--border-subtle);
+    border-radius: 10px;
+    opacity: 0.85;
+  }
+  .source-badge.attendance {
+    font-size: 9px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+    padding: 2px 8px;
+    border-radius: 5px;
+    color: var(--text-secondary);
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+  }
+  .source-badge.attendance.status-absent { border-color: rgba(225, 29, 72, 0.4); color: var(--att-absent); }
+  .source-badge.attendance.status-wfh { border-color: rgba(250, 204, 21, 0.4); color: var(--att-wfh); }
+  .source-badge.attendance.status-sl { border-color: rgba(245, 158, 11, 0.4); color: var(--att-sl); }
+  .source-badge.attendance.status-vl { border-color: rgba(139, 92, 246, 0.4); color: var(--att-vl); }
+  .source-badge.attendance.status-present { border-color: rgba(34, 197, 94, 0.4); color: var(--att-present); }
+  .attendance-hint {
+    font-style: italic;
+    opacity: 0.75;
+  }
+  .log-time-btn {
+    background: rgba(251, 191, 36, 0.12);
+    border: 1px solid rgba(251, 191, 36, 0.35);
+    color: #fbbf24;
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all .15s;
+    white-space: nowrap;
+  }
+  .log-time-btn:hover {
+    background: #fbbf24;
+    color: #050b16;
+  }
+  .shift-title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .source-badge {
+    font-size: 9px;
+    font-weight: 800;
+    padding: 2px 6px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+  .source-badge.clockify {
+    background: rgba(96, 165, 250, 0.1);
+    color: #60a5fa;
+    border: 1px solid rgba(96, 165, 250, 0.2);
+  }
+  .source-badge.manual {
+    background: rgba(237, 102, 33, 0.1);
+    color: var(--ntv-orange);
+    border: 1px solid rgba(237, 102, 33, 0.2);
+  }
+  .source-badge.running {
+    display: inline-flex; align-items: center; gap: 5px;
+    background: rgba(34, 197, 94, 0.1);
+    color: var(--att-present);
+    border: 1px solid rgba(34, 197, 94, 0.25);
+  }
+  .running-dot {
+    width: 6px; height: 6px; border-radius: 50%; background: var(--att-present);
+    animation: running-pulse 1.4s ease-in-out infinite;
+  }
+  .running-item { background: rgba(34, 197, 94, 0.03); }
+  .pagination-controls {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    margin-top: 24px;
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+  }
+  .pagination-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    border: 1px solid var(--border-subtle);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .pagination-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.08);
+    color: white;
+    border-color: rgba(255, 255, 255, 0.2);
+  }
+  .pagination-btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+  .pagination-info {
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+  .pagination-info strong {
+    color: white;
+  }
+  @keyframes running-pulse { 50% { opacity: 0.3; } }
+</style>

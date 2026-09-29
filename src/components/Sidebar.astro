@@ -184,28 +184,32 @@ const navItems = allNavItems.filter(item => item.roles?.includes(role || 'studen
   // loader for that page while the browser fetches it, instead of the old page sitting there
   // until the new one is fully built.
   const nav = document.querySelector('#sidebar .sidebar-nav');
+  const main = document.getElementById('portal-main');
+  const pageTab = nav?.querySelector('.active-nav');
+  let hideLoader = null;
+
   nav?.addEventListener('click', (e) => {
     const link = e.target.closest('a.nav-item');
     // Leave new-tab / new-window clicks alone.
-    if (!link || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-    const main = document.getElementById('portal-main');
-    if (!main) return;
+    if (!link || !main || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
 
-    const previous = nav.querySelector('.active-nav');
-    previous?.classList.remove('active-nav');
+    // A second click while the first tab is still loading replaces that loader, not stacks on it.
+    hideLoader?.();
+    nav.querySelector('.active-nav')?.classList.remove('active-nav');
     link.classList.add('active-nav');
     document.body.classList.remove('sidebar-open');
     main.classList.add('tab-switching');
     window.scrollTo(0, 0);
-    const hideLoader = window.showSectionLoading?.(main, `Loading ${link.textContent.trim()}`);
+    hideLoader = window.showSectionLoading?.(main, `Loading ${link.textContent.trim()}`);
+  });
 
-    // Back/forward can restore this page from memory with the loader still up — undo it then.
-    window.addEventListener('pageshow', (ev) => {
-      if (!ev.persisted) return;
-      hideLoader?.();
-      main.classList.remove('tab-switching');
-      link.classList.remove('active-nav');
-      previous?.classList.add('active-nav');
-    }, { once: true });
+  // Back/forward can restore this page from memory with a loader still up — put it back as it was.
+  window.addEventListener('pageshow', (ev) => {
+    if (!ev.persisted || !main) return;
+    hideLoader?.();
+    hideLoader = null;
+    main.classList.remove('tab-switching');
+    nav?.querySelector('.active-nav')?.classList.remove('active-nav');
+    pageTab?.classList.add('active-nav');
   });
 </script>

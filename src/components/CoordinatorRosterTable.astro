@@ -1,0 +1,120 @@
+---
+// The coordinator's student roster table. The Coordinator page renders it without `students`
+// as an instant placeholder (header row plus shimmering rows); CoordinatorData renders it again
+// once every student's hours are in.
+import { formatHours } from '../lib/utils';
+
+interface Props {
+  students?: any[];
+}
+
+const { students: filteredStudents } = Astro.props;
+---
+
+<div class="table-wrapper">
+  <table class="student-table">
+    <thead>
+      <tr>
+        <th>Student Name</th>
+        <th>Section</th>
+        <th>Agency</th>
+        <th>Hours Rendered</th>
+        <th>Progress</th>
+        <th>Status</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      {!filteredStudents ? [0, 1, 2].map(() => (
+      <tr class="sk-row">
+        {[0, 1, 2, 3, 4, 5, 6].map(() => <td><span class="sk-cell"></span></td>)}
+      </tr>
+    )) : filteredStudents.length > 0 ? filteredStudents.map((s) => (
+        <tr>
+          <td>
+            <div class="student-info-cell">
+              {s.user_picture && <img src={s.user_picture} alt="" class="row-avatar" />}
+              <span class="row-name">{s.user_name}</span>
+            </div>
+          </td>
+          <td>
+            <span class="program-tag" style="opacity: 0.85;">
+              {s.coordinator_sections?.section_name || 'General / Unassigned'}
+            </span>
+          </td>
+          <td><span class="program-tag">{s.host_company}</span></td>
+          <td class="mono">{formatHours(s.renderedHours)} / {formatHours(s.target_hours)}</td>
+          <td>
+            <div class="progress-col">
+              <span class="percent">{s.percent}%</span>
+              <div class="mini-track">
+                <div class="mini-fill" style={`width: ${s.percent}%`}></div>
+              </div>
+            </div>
+          </td>
+          <td>
+            <span class={`status-badge ${Number(s.percent) >= 100 ? 'done' : 'active'}`}>
+              {Number(s.percent) >= 100 ? 'Completed' : 'In Progress'}
+            </span>
+          </td>
+          <td>
+            <a href={`/dtr?studentId=${s.user_id}`} class="view-link">View DTR</a>
+          </td>
+        </tr>
+      )) : (
+        <tr>
+          <td colspan="7" class="empty-state">No students match the criteria for this section.</td>
+        </tr>
+      )}
+    </tbody>
+  </table>
+</div>
+
+<style>
+  .student-info-cell { display: flex; align-items: center; gap: 12px; }
+  .row-avatar { width: 28px; height: 28px; border-radius: 50%; border: 1.5px solid var(--ntv-orange); }
+  .row-name { font-weight: 600; color: #fff; }
+  
+  .table-wrapper { background: var(--card-bg); border: 1px solid var(--border-subtle); border-radius: 16px; overflow: hidden; }
+  .student-table { width: 100%; border-collapse: collapse; text-align: left; }
+  .student-table th { padding: 14px 20px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-secondary); border-bottom: 1px solid var(--border-subtle); }
+  .student-table td { padding: 16px 20px; border-bottom: 1px solid var(--border-subtle); font-size: 14px; }
+  .student-table tr:last-child td { border-bottom: none; }
+  .student-table tr:hover { background: rgba(237, 102, 33, 0.02); }
+
+  .student-profile { display: flex; align-items: center; gap: 12px; }
+  .avatar { width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--border-subtle); }
+  .profile-info { display: flex; flex-direction: column; }
+  .name { font-weight: 600; color: #fff; }
+  .email { font-size: 11px; color: var(--text-secondary); }
+
+  .program-tag { font-size: 12px; color: var(--text-primary); }
+  .mono { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: #fff; }
+  
+  .progress-col { display: flex; flex-direction: column; gap: 6px; min-width: 140px; }
+  .percent { font-size: 12px; font-weight: 700; color: var(--ntv-orange); font-family: 'JetBrains Mono', monospace; }
+  .mini-track { width: 100%; height: 4px; background: rgba(255,255,255,0.05); border-radius: 2px; }
+  .mini-fill { height: 100%; background: var(--ntv-gradient); border-radius: 2px; }
+
+  .status-badge { display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; font-size: 10px; font-weight: 700; padding: 4px 10px; border-radius: 20px; }
+  .status-badge.active { background: rgba(52, 211, 153, 0.1); color: #34d399; border: 1px solid rgba(52, 211, 153, 0.2); }
+  .status-badge.done { background: var(--ntv-gradient); color: #fff; }
+
+  .view-link { display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; font-size: 11px; font-weight: 700; color: var(--ntv-orange); text-decoration: none; padding: 6px 12px; background: rgba(237, 102, 33, 0.1); border: 1px solid rgba(237, 102, 33, 0.2); border-radius: 6px; transition: 0.2s; }
+  .view-link:hover { background: var(--ntv-orange); color: #fff; }
+
+  .empty-state { text-align: center; padding: 60px; color: var(--text-secondary); font-style: italic; }
+
+  .sk-cell {
+    display: block; height: 10px; width: 70%; border-radius: 6px;
+    background: linear-gradient(90deg, rgba(127,127,127,.08) 25%, rgba(127,127,127,.18) 50%, rgba(127,127,127,.08) 75%);
+    background-size: 200% 100%; animation: sk-shimmer 1.4s ease-in-out infinite;
+  }
+  @keyframes sk-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+  @media (prefers-reduced-motion: reduce) { .sk-cell { animation: none; } }
+
+  @media (max-width: 900px) {
+    .table-wrapper { overflow-x: auto; }
+    .student-table { min-width: 700px; }
+  }
+</style>

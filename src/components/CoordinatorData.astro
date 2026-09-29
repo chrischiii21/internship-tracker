@@ -1,0 +1,73 @@
+---
+// Server island for the coordinator's roster (server:defer in pages/coordinator.astro): the page
+// shell — header, filters, student count — paints right away, and every student's hours (their
+// entries plus Clockify, one student at a time in parallel) arrive in this request.
+import { getSession } from '../lib/auth';
+import { parse } from 'cookie';
+import { getAppSettings } from '../lib/settings';
+import { supabase } from '../lib/supabase';
+import { getStudentProgress } from '../lib/clockify';
+import CoordinatorRosterTable from './CoordinatorRosterTable.astro';
+
+interface Props {
+  viewerId: string;
+  section: string;
+  agency: string;
+  status: string;
+}
+
+const { viewerId, section, agency, status } = Astro.props;
+
+// Per-user data: never let a shared cache hold on to it.
+Astro.response.headers.set('Cache-Control', 'private, no-store');
+
+const cookies = parse(Astro.request.headers.get('cookie') || '');
+const user = cookies.session ? await getSession(cookies.session) : null;
+const settings = user && user.id === viewerId ? await getAppSettings(user.id) : null;
+const allowed = settings?.role === 'coordinator';
+
+let sectionFilteredStudents: any[] = [];
+let filteredStudents: any[] = [];
+if (allowed) {
+  const { data: students } = await supabase
+    .from('student_settings')
+    .select('*, coordinator_sections(section_name)')
+    .eq('coordinator_id', viewerId);
+
+  // Total rendered hours per student: this system's entries plus Clockify.
+  const studentStats = await Promise.all((students || []).map(async (s) => {
+    const hours = await getStudentProgress(s.user_id, s.user_email, s.start_date);
+    const percent = Math.min(100, (hours / s.target_hours) * 100);
+    return { ...s, renderedHours: hours, percent: percent.toFixed(1) };
+  }));
+
+  // Section filter first — the completed / in-progress counts are for the whole section.
+  sectionFilteredStudents = section !== 'all' ? studentStats.filter(s => s.section_id === section) : studentStats;
+
+  filteredStudents = sectionFilteredStudents;
+  if (agency !== 'all') filteredStudents = filteredStudents.filter(s => s.host_company === agency);
+  if (status === 'completed') filteredStudents = filteredStudents.filter(s => Number(s.percent) >= 100);
+  else if (status === 'ongoing') filteredStudents = filteredStudents.filter(s => Number(s.percent) < 100);
+}
+
+const completedCount = sectionFilteredStudents.filter(s => Number(s.percent) >= 100).length;
+---
+
+{allowed ? (
+  <div id="coord-data" data-completed={completedCount} data-in-progress={sectionFilteredStudents.length - completedCount}>
+    <CoordinatorRosterTable students={filteredStudents} />
+  </div>
+) : (
+  <p class="session-ended">Your session has ended. <a href="/">Sign in again</a> to see your students.</p>
+)}
+
+<script is:inline>
+  // Tells the page script (completed / in-progress counts) that the roster just landed.
+  window.__coordRosterReady = true;
+  document.dispatchEvent(new Event('coord:roster-ready'));
+</script>
+
+<style>
+  .session-ended { color: var(--text-secondary); font-size: 14px; }
+  .session-ended a { color: var(--ntv-orange); font-weight: 700; }
+</style>

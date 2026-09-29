@@ -6,6 +6,9 @@ import fs from 'node:fs';
 export default defineConfig({
   site: 'https://internship-tracker-self.vercel.app',
   output: 'server',
+  // Astro 7 defaults to 'jsx', which drops whitespace between inline elements written on separate
+  // lines; keep the HTML-aware compression the pages were written against.
+  compressHTML: true,
   adapter: vercel({
     webAnalytics: {
       enabled: true,

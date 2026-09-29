@@ -1,0 +1,1124 @@
+---
+// Everything on the dashboard that needs hour data. Rendered inside the DashboardData server
+// island, after the page shell has already painted.
+import { getTrackedEntries, getActiveTimer } from '../lib/entries';
+import { getStudentProgress } from '../lib/clockify';
+import { formatHMS, formatHours, manilaDate } from '../lib/utils';
+import { groupEntries } from '../lib/grouping';
+import { totalEarnings, totalDaysWorked, buildPeriodBreakdown } from '../lib/earnings';
+import { getPayoutAdjustments } from '../lib/payouts';
+import type { AppSettings } from '../lib/settings';
+import DashboardProfileCard from './DashboardProfileCard.astro';
+
+interface Props {
+  user: { id: string; email: string; name?: string };
+  settings: AppSettings;
+  wm?: string;
+}
+const { user, settings, wm } = Astro.props;
+
+const activeStartDate = settings.isEmployee ? (settings.employeeStartDate || settings.startDate) : settings.startDate;
+const activePaySchedule = settings.isEmployee ? (settings.employeePaySchedule || 'monthly') : settings.paySchedule;
+
+// Calculate Total Progress using the Unified Sync Engine
+let renderedHours = await getStudentProgress(user.id, user.email, activeStartDate, settings.isEmployee);
+
+// Everything that counts toward hours: synced Clockify sessions plus entries logged here.
+const allRawEntries = await getTrackedEntries(user.id, user.email, settings, activeStartDate);
+
+// A session that is still running lives in active_timers and only becomes an `entries` row on
+// time-out — so without this every figure below reads zero for today while you are clocked in.
+// Counted against its start date, the same day stopTimer will file it under.
+const liveTimer = await getActiveTimer(user.id, settings.isEmployee ?? false);
+let liveSeconds = 0;
+let liveDateStr = '';
+if (liveTimer) {
+  const liveStart = new Date(liveTimer.startTime);
+  liveSeconds = Math.max(0, Math.floor((Date.now() - liveStart.getTime()) / 1000));
+  liveDateStr = manilaDate(liveStart);
+  allRawEntries.push({ date: liveDateStr, durationSeconds: liveSeconds });
+  renderedHours += liveSeconds / 3600;
+}
+
+const dailyHoursMap: Record<string, number> = {};
+allRawEntries.forEach(e => {
+  dailyHoursMap[e.date] = (dailyHoursMap[e.date] || 0) + e.durationSeconds / 3600;
+});
+const todayManila = manilaDate();
+// Anchored at UTC midnight of the Manila date, so day arithmetic stays on the same calendar days
+// the entry keys use.
+const manilaDayOffset = (n: number) => {
+  const d = new Date(`${todayManila}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d;
+};
+// Rolling 7-day total, kept only for the recent-pace badge — the tile that used to show it was
+// redundant with the Weekly Activity card below.
+const totalWeekHours = Array.from({ length: 7 }, (_, i) =>
+  dailyHoursMap[manilaDayOffset(-i).toISOString().split('T')[0]] || 0
+).reduce((sum, h) => sum + h, 0);
+
+// Today's running total: everything already closed today plus the session still ticking. The
+// closed part is what the client ticker counts up from, so it never double-counts the live one.
+const todaySeconds = Math.round((dailyHoursMap[todayManila] || 0) * 3600);
+// A timer started before midnight belongs to yesterday (that is the day stopTimer files it under),
+// so it neither ticks here nor gets subtracted from today's base.
+const liveStartedToday = !!liveTimer && manilaDate(new Date(liveTimer.startTime)) === todayManila;
+const todayClosedSeconds = Math.max(0, todaySeconds - (liveStartedToday ? liveSeconds : 0));
+const todayEntryCount = allRawEntries.filter(e => e.date === todayManila).length - (liveStartedToday ? 1 : 0);
+
+// Weekly totals for real Mon-Sun calendar weeks that overlap the current month — a week counts as
+// one block even when it straddles the month boundary, instead of getting cut off at the 1st.
+const isoWeekdayOf = (dateStr: string) => {
+  const wd = new Date(`${dateStr}T00:00:00Z`).getUTCDay();
+  return wd === 0 ? 7 : wd; // 1=Mon..7=Sun
+};
+const shortDate = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+
+const mondayThisWeekStr = manilaDayOffset(-(isoWeekdayOf(todayManila) - 1)).toISOString().split('T')[0];
+
+// Weekly Activity browses every month from the start date to today. All of them are rendered up
+// front and the arrows only switch which one is visible, so browsing never reloads the page;
+// ?wm=YYYY-MM picks the month shown first.
+const currentMonthKey = todayManila.slice(0, 7);
+const startMonthKey = (activeStartDate || todayManila).slice(0, 7);
+const firstMonthKey = startMonthKey < currentMonthKey ? startMonthKey : currentMonthKey;
+const wmParam = wm || '';
+const selectedMonthKey = /^\d{4}-\d{2}$/.test(wmParam) && wmParam >= firstMonthKey && wmParam <= currentMonthKey ? wmParam : currentMonthKey;
+const shiftMonthKey = (key: string, n: number) => {
+  const [y, m] = key.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1 + n, 1)).toISOString().slice(0, 7);
+};
+
+const buildWeekMonth = (monthKey: string) => {
+  const monthStartStr = `${monthKey}-01`;
+  const mondayOfMonthStart = new Date(`${monthStartStr}T00:00:00Z`);
+  mondayOfMonthStart.setUTCDate(mondayOfMonthStart.getUTCDate() - (isoWeekdayOf(monthStartStr) - 1));
+  const [yearNum, monthNum] = monthKey.split('-').map(Number);
+  const daysInMonth = new Date(Date.UTC(yearNum, monthNum, 0)).getUTCDate();
+  const monthEndStr = `${monthKey}-${String(daysInMonth).padStart(2, '0')}`;
+  const mondayOfMonthEnd = new Date(`${monthEndStr}T00:00:00Z`);
+  mondayOfMonthEnd.setUTCDate(mondayOfMonthEnd.getUTCDate() - (isoWeekdayOf(monthEndStr) - 1));
+  // Full month up front, so a week that hasn't happened yet shows as an empty row instead of not
+  // existing at all.
+  const weeksCount = Math.round((mondayOfMonthEnd.getTime() - mondayOfMonthStart.getTime()) / (7 * 86400000)) + 1;
+
+  const weeks: { label: string, from: string, to: string, isCurrent: boolean, days: number, hours: number }[] =
+    Array.from({ length: weeksCount }, (_, i) => {
+      const start = new Date(mondayOfMonthStart);
+      start.setUTCDate(start.getUTCDate() + i * 7);
+      const end = new Date(start);
+      end.setUTCDate(end.getUTCDate() + 6);
+      const from = start.toISOString().split('T')[0];
+      return {
+        label: `${shortDate(start)} – ${shortDate(end)}`,
+        from,
+        to: end.toISOString().split('T')[0],
+        isCurrent: from === mondayThisWeekStr,
+        days: 0,
+        hours: 0,
+      };
+    });
+
+  // Weekly Activity only counts a session once it's stopped — a running timer keeps ticking on
+  // the Today tile, but shouldn't inflate this week's row until it lands as a closed entry.
+  Object.entries(dailyHoursMap).forEach(([d, h]) => {
+    const week = weeks.find(w => d >= w.from && d <= w.to);
+    if (!week) return;
+    const closedH = d === liveDateStr ? Math.max(0, h - liveSeconds / 3600) : h;
+    week.hours += closedH;
+    if (closedH > 0) week.days++;
+  });
+
+  return {
+    key: monthKey,
+    label: new Date(`${monthStartStr}T00:00:00Z`).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' }),
+    weeks,
+    maxWeekHours: Math.max(1, ...weeks.map(w => w.hours)),
+    totalHours: Object.entries(dailyHoursMap)
+      .filter(([d]) => d.startsWith(monthKey))
+      .reduce((sum, [, h]) => sum + h, 0),
+    prevKey: monthKey > firstMonthKey ? shiftMonthKey(monthKey, -1) : null,
+    nextKey: monthKey < currentMonthKey ? shiftMonthKey(monthKey, 1) : null,
+  };
+};
+const weekMonths: ReturnType<typeof buildWeekMonth>[] = [];
+for (let key = firstMonthKey; key <= currentMonthKey; key = shiftMonthKey(key, 1)) {
+  weekMonths.push(buildWeekMonth(key));
+}
+const bestDayHours = Math.max(0, ...Object.values(dailyHoursMap));
+
+let currentStreak = 0;
+for (let i = 0; i < 3650; i++) {
+  const dateStr = manilaDayOffset(-i).toISOString().split('T')[0];
+  if ((dailyHoursMap[dateStr] || 0) > 0) currentStreak++;
+  else break;
+}
+
+// Period breakdown behind the earnings tile — the full list opens in a modal from the tile, so
+// there's no separate page to keep in step.
+const isEarningsMode = !!(settings.hasAllowance || settings.isEmployee);
+const earningsGroups = groupEntries(allRawEntries, isEarningsMode ? activePaySchedule : 'monthly');
+const payoutAdjustments = isEarningsMode ? await getPayoutAdjustments(user.id) : {};
+const periodRows = buildPeriodBreakdown(settings, earningsGroups, payoutAdjustments).reverse();
+
+const quickEarnings = isEarningsMode ? totalEarnings(settings, earningsGroups) : 0;
+const quickEarningsPeriods = earningsGroups.length;
+const quickEarningsDays = totalDaysWorked(earningsGroups);
+const quickEarningsHours = earningsGroups.reduce((sum, group) => sum + group.totalSeconds, 0) / 3600;
+const quickEarningsRate = settings.isEmployee
+  ? (activePaySchedule === 'semi-monthly' ? (settings.monthlyRate || 0) / 2 : (settings.monthlyRate || 0))
+  : settings.hourlyRate;
+
+// All-time activity stats: active day count, longest consecutive streak, average pace, this-month total
+const activeDates = Object.keys(dailyHoursMap).filter(d => dailyHoursMap[d] > 0).sort();
+const activeDaysCount = activeDates.length;
+let longestStreak = 0;
+{
+  let run = 0;
+  let prevTime = 0;
+  for (const dateStr of activeDates) {
+    const t = new Date(dateStr).getTime();
+    run = (prevTime && t - prevTime === 86400000) ? run + 1 : 1;
+    longestStreak = Math.max(longestStreak, run);
+    prevTime = t;
+  }
+}
+
+const daysSinceStart = Math.max(1, Math.ceil((new Date().getTime() - new Date(activeStartDate).getTime()) / 86400000));
+const avgHoursPerDayOverall = renderedHours / daysSinceStart;
+
+const currentMonthPrefix = todayManila.slice(0, 7);
+const hoursThisMonth = Object.entries(dailyHoursMap)
+  .filter(([d]) => d.startsWith(currentMonthPrefix))
+  .reduce((sum, [, h]) => sum + h, 0);
+
+// Hours per week from program start to today — the total logged inside each week, not a running
+// total, so a slow week reads as a dip instead of a flatter climb. Weeks are 7-day blocks from the
+// start date; the last one is short whenever today lands mid-week.
+// (ponytail: window capped defensively against a bad/very old start date, not a real-world case.)
+const CHART_MAX_WEEKS = 104;
+const chartToday = new Date(`${todayManila}T00:00:00Z`);
+const chartTrueStart = new Date(`${activeStartDate}T00:00:00Z`);
+const chartTotalSpanDays = Math.max(1, Math.floor((chartToday.getTime() - chartTrueStart.getTime()) / 86400000) + 1);
+
+const chartDayLabel = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+const weekSeries = Array.from({ length: Math.ceil(chartTotalSpanDays / 7) }, (_, w) => {
+  const start = new Date(chartTrueStart);
+  start.setUTCDate(start.getUTCDate() + w * 7);
+  const end = new Date(start);
+  end.setUTCDate(end.getUTCDate() + 6);
+  if (end > chartToday) end.setTime(chartToday.getTime());
+
+  let hours = 0;
+  for (let c = new Date(start); c <= end; c.setUTCDate(c.getUTCDate() + 1)) {
+    hours += dailyHoursMap[c.toISOString().split('T')[0]] || 0;
+  }
+  return { date: end.toISOString().split('T')[0], label: `${chartDayLabel(start)} – ${chartDayLabel(end)}`, hours };
+}).slice(-CHART_MAX_WEEKS);
+
+const CHART_W = 720;
+const CHART_H = 220;
+const CHART_PAD = { top: 16, right: 16, bottom: 26, left: 46 };
+const chartPlotW = CHART_W - CHART_PAD.left - CHART_PAD.right;
+const chartPlotH = CHART_H - CHART_PAD.top - CHART_PAD.bottom;
+
+// The cumulative target line went with the cumulative series — a 486h goal drawn against ~40h
+// weeks would flatten the whole chart. Progress against target still lives in the cards above.
+const weekMaxHours = Math.max(0, ...weekSeries.map(w => w.hours));
+const chartMaxY = (weekMaxHours * 1.15) || 1;
+
+const chartX = (i: number) => weekSeries.length > 1 ? CHART_PAD.left + (i / (weekSeries.length - 1)) * chartPlotW : CHART_PAD.left + chartPlotW / 2;
+const chartY = (v: number) => CHART_PAD.top + (1 - v / chartMaxY) * chartPlotH;
+
+const chartPoints = weekSeries.map((d, i) => ({ x: chartX(i), y: chartY(d.hours), date: d.label, hours: d.hours.toFixed(1) }));
+const linePath = chartPoints.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+const areaPath = chartPoints.length > 0
+  ? `${chartX(0).toFixed(1)},${chartY(0).toFixed(1)} ${linePath} ${chartX(weekSeries.length - 1).toFixed(1)},${chartY(0).toFixed(1)}`
+  : '';
+const chartYTicks = [0, chartMaxY / 2, chartMaxY];
+const avgWeekHours = weekSeries.reduce((sum, w) => sum + w.hours, 0) / (weekSeries.length || 1);
+const chartAvgY = chartY(avgWeekHours);
+const chartLastPoint = chartPoints[chartPoints.length - 1];
+
+const progressPercent = settings.isEmployee ? 0 : Math.min(100, (renderedHours / (settings.targetHours || 1)) * 100);
+
+// Calculate Estimated Finish Date
+let finishDateStr = '';
+if (!settings.isEmployee) {
+  const remainingHours = Math.max(0, settings.targetHours - renderedHours);
+  let avgHoursPerDay = 8; // Default
+
+  if (allRawEntries.length > 0) {
+    // Calculate average from last 7 unique days of logs
+    const dailyTotals: Record<string, number> = {};
+    allRawEntries.forEach(e => {
+      dailyTotals[e.date] = (dailyTotals[e.date] || 0) + (e.durationSeconds / 3600);
+    });
+    const recentDays = Object.values(dailyTotals).slice(-7);
+    if (recentDays.length > 0) {
+      avgHoursPerDay = recentDays.reduce((a, b) => a + b, 0) / recentDays.length;
+      if (avgHoursPerDay < 1) avgHoursPerDay = 8; // Fallback if average is too low
+    }
+  }
+
+  const workDaysRemaining = Math.ceil(remainingHours / avgHoursPerDay);
+  let estimatedFinishDate = new Date();
+  let daysAdded = 0;
+  while (daysAdded < workDaysRemaining) {
+    estimatedFinishDate.setDate(estimatedFinishDate.getDate() + 1);
+    // Skip weekends (0 is Sunday, 6 is Saturday)
+    if (estimatedFinishDate.getDay() !== 0 && estimatedFinishDate.getDay() !== 6) {
+      daysAdded++;
+    }
+  }
+
+  finishDateStr = estimatedFinishDate.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric'
+  });
+}
+
+// Pace badge: recent 7-day average vs overall average since start
+let paceStatus = '';
+let recentAvgHours = 0;
+if (!settings.isEmployee) {
+  recentAvgHours = totalWeekHours / 7;
+  paceStatus = recentAvgHours >= avgHoursPerDayOverall ? 'ahead' : 'behind';
+}
+---
+
+<div class="dash-data">
+        <div class="metrics-grid">
+          {settings.isEmployee ? (
+            <>
+              <div class="metric-card" style="justify-content: center; height: 100%; min-height: 180px;">
+                <div class="metric-info">
+                  <span class="metric-label">Total Time Tracked</span>
+                  <div class="metric-value" style="font-size: 36px;">{formatHours(renderedHours)}</div>
+                  <span class="metric-subtext" style="margin-top: 4px; display: block; font-size: 13px; color: var(--text-secondary);">
+                    Active session hours logged in your system.
+                  </span>
+                </div>
+                <div class="hero-substats">
+                  <div class="hero-substat">
+                    <span class="hero-substat-label">Avg / Day</span>
+                    <span class="hero-substat-value">{avgHoursPerDayOverall.toFixed(1)}h</span>
+                  </div>
+                  <div class="hero-substat">
+                    <span class="hero-substat-label">This Month</span>
+                    <span class="hero-substat-value">{formatHours(hoursThisMonth)}</span>
+                  </div>
+                  <div class="hero-substat">
+                    <span class="hero-substat-label">Active Days</span>
+                    <span class="hero-substat-value">{activeDaysCount}</span>
+                  </div>
+                </div>
+              </div>
+
+              <DashboardProfileCard settings={settings} />
+            </>
+          ) : (
+            <>
+              <div class="metrics-column">
+                <div class="metric-card">
+                  <div class="metric-info">
+                    <span class="metric-label">Hours Rendered</span>
+                    <div class="metric-value">{formatHours(renderedHours)} <span class="unit">/ {formatHours(settings.targetHours)}</span></div>
+                  </div>
+                  <div class="metric-progress">
+                    <div class={`progress-fill ${progressPercent >= 100 ? 'success' : ''}`} style={`width: ${progressPercent}%`}></div>
+                  </div>
+                  <div class="progress-status">
+                    <span>{progressPercent >= 100 ? 'Completed' : 'In Progress'}</span>
+                    <span class="percent-val">{progressPercent.toFixed(2)}%</span>
+                  </div>
+                </div>
+
+                <div class={`metric-card highlight-card ${renderedHours > settings.targetHours ? 'overtime' : ''}`}>
+                  <div class="metric-info">
+                    <span class="metric-label">{renderedHours > settings.targetHours ? 'Excess Time' : 'Remaining Time'}</span>
+                    <div class="metric-value">
+                      {renderedHours > settings.targetHours ? '+' : ''}
+                      {formatHMS(Math.abs((settings.targetHours * 3600) - (renderedHours * 3600)))}
+                    </div>
+                    <span class="metric-subtext">
+                      {renderedHours >= settings.targetHours
+                        ? 'Goal reached! Every hour now is extra credit.'
+                        : `Est. Finish: ${finishDateStr}`}
+                    </span>
+                    {renderedHours < settings.targetHours && (
+                      <span class={`pace-badge ${paceStatus}`}>
+                        {paceStatus === 'ahead' ? '↑' : '↓'} {recentAvgHours.toFixed(1)}h/day recent pace
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <DashboardProfileCard settings={settings} />
+            </>
+          )}
+        </div>
+
+        <div class="quick-stats">
+          <div class="stat-tile">
+            <div class="stat-head">
+              <span class="stat-label">Today</span>
+              <span
+                class="stat-value"
+                id="today-total"
+                data-closed={todayClosedSeconds}
+                data-live-start={liveStartedToday ? liveTimer!.startTime : ''}
+              >{formatHMS(todaySeconds)}</span>
+            </div>
+            <p class="stat-explain">
+              {liveStartedToday
+                ? `Counting up live — ${todayEntryCount} closed ${todayEntryCount === 1 ? 'entry' : 'entries'} today plus the session running now.`
+                : `${todayEntryCount} ${todayEntryCount === 1 ? 'entry' : 'entries'} logged today. Time In from the header to start counting.`}
+            </p>
+            {liveStartedToday && (
+              <p class="stat-explain" id="today-eta">&nbsp;</p>
+            )}
+          </div>
+          <script is:inline define:vars={{ DAILY_TARGET_SECONDS: 8 * 3600 }}>
+            // Keeps the Today tile ticking while a session is open. Time In/Out reloads the page,
+            // so the closed base below is never stale.
+            {
+              const el = document.getElementById('today-total');
+              const etaEl = document.getElementById('today-eta');
+              const startedAt = el && el.dataset.liveStart ? new Date(el.dataset.liveStart).getTime() : null;
+              if (startedAt) {
+                const closed = Number(el.dataset.closed) || 0;
+                const pad = (n) => String(n).padStart(2, '0');
+                const tick = () => {
+                  const elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+                  const t = closed + elapsed;
+                  el.textContent = `${pad(Math.floor(t / 3600))}:${pad(Math.floor((t % 3600) / 60))}:${pad(t % 60)}`;
+
+                  if (etaEl) {
+                    const remaining = DAILY_TARGET_SECONDS - t;
+                    if (remaining > 0) {
+                      const clockOut = new Date(Date.now() + remaining * 1000);
+                      const time = clockOut.toLocaleTimeString('en-US', { timeZone: 'Asia/Manila', hour: 'numeric', minute: '2-digit' });
+                      etaEl.textContent = `On pace to hit 8 hrs at ${time}.`;
+                    } else {
+                      etaEl.textContent = `8-hour day already complete.`;
+                    }
+                  }
+                };
+                tick();
+                setInterval(tick, 1000);
+              }
+            }
+          </script>
+
+          <div class="stat-tile">
+            <div class="stat-head">
+              <span class="stat-label">Streak</span>
+              <span class="stat-value">{currentStreak} {currentStreak === 1 ? 'day' : 'days'}</span>
+            </div>
+            <p class="stat-explain">
+              Consecutive days with at least one log, counting back from today. Your best run since {activeStartDate} was {longestStreak} {longestStreak === 1 ? 'day' : 'days'}.
+            </p>
+          </div>
+
+          <div class="stat-tile">
+            <div class="stat-head">
+              <span class="stat-label">Total Logs</span>
+              <span class="stat-value">{allRawEntries.length}</span>
+            </div>
+            <p class="stat-explain">
+              {allRawEntries.length} time entries recorded since {activeStartDate}, across {activeDaysCount} active days — combines synced sessions and manual entries.
+            </p>
+          </div>
+
+          {isEarningsMode ? (
+            <div class="stat-tile" data-tour="earnings-tile">
+              <div class="stat-head">
+                <span class="stat-label">Expected Earnings</span>
+                <span class="stat-value">₱{quickEarnings.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span>
+              </div>
+              <p class="stat-explain">
+                {settings.isEmployee
+                  ? `${quickEarningsPeriods} pay period(s) × ₱${quickEarningsRate.toLocaleString()} on your ${activePaySchedule} schedule.`
+                  : settings.payType === 'daily'
+                    ? `${quickEarningsDays} day(s) worked × ₱${settings.hourlyRate}/day.`
+                    : `${formatHours(quickEarningsHours)} tracked × ₱${settings.hourlyRate}/hr.`}
+                {' '}<button type="button" class="stat-explain-link open-breakdown">View full breakdown →</button>
+              </p>
+            </div>
+          ) : (
+            <div class="stat-tile" data-tour="earnings-tile">
+              <div class="stat-head">
+                <span class="stat-label">Best Day</span>
+                <span class="stat-value">{formatHours(bestDayHours)}</span>
+              </div>
+              <p class="stat-explain">
+                Your single best day out of {activeDaysCount} active day(s) logged so far.
+                {' '}<button type="button" class="stat-explain-link open-breakdown">Monthly breakdown →</button>
+              </p>
+            </div>
+          )}
+        </div>
+
+        <div class="full-grid">
+          <section class="weekly-chart-card" id="weekly-activity">
+            <div class="section-header">
+              <h2>Weekly <span class="accent">Activity</span></h2>
+              {weekMonths.map(m => (
+                <span class="chart-total" data-wm={m.key} hidden={m.key !== selectedMonthKey}>{formatHours(m.totalHours)} {m.key === currentMonthKey ? 'this month' : 'total'}</span>
+              ))}
+            </div>
+            {weekMonths.map(m => (
+              <div data-wm={m.key} hidden={m.key !== selectedMonthKey}>
+                <div class="week-month-nav">
+                  {m.prevKey
+                    ? <a class="week-month-btn" href={`?wm=${m.prevKey}#weekly-activity`} data-wm-go={m.prevKey} aria-label="Previous month"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg></a>
+                    : <span class="week-month-btn disabled" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg></span>}
+                  <span class="week-month-label">{m.label}</span>
+                  {m.nextKey
+                    ? <a class="week-month-btn" href={`?wm=${m.nextKey}#weekly-activity`} data-wm-go={m.nextKey} aria-label="Next month"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg></a>
+                    : <span class="week-month-btn disabled" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg></span>}
+                  {m.key !== currentMonthKey && <a class="week-month-today" href="/dashboard#weekly-activity" data-wm-go={currentMonthKey}>This month</a>}
+                </div>
+                <div class="week-rows">
+                  {m.weeks.map(w => (
+                    <div class={`week-row ${w.isCurrent ? 'current' : ''}`}>
+                      <div class="week-range">
+                        <span>{w.label}</span>
+                        {w.isCurrent && <span class="week-now">this week</span>}
+                      </div>
+                      <div class="week-track">
+                        <div class={`week-fill ${w.hours > 0 ? 'has-hours' : ''}`} style={`width: ${(w.hours / m.maxWeekHours) * 100}%`}></div>
+                      </div>
+                      <div class="week-figures">
+                        <span class="week-hours">{formatHours(w.hours)}</span>
+                        <span class="week-days">{w.days} {w.days === 1 ? 'day' : 'days'}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </section>
+
+          <section class="progress-chart-card">
+            <div class="section-header">
+              <h2>Progress <span class="accent">Trend</span></h2>
+              <div class="chart-legend">
+                <span class="legend-item"><span class="legend-swatch line"></span>Hours / Week</span>
+                <span class="legend-item"><span class="legend-swatch target"></span>Avg {avgWeekHours.toFixed(1)}h</span>
+              </div>
+            </div>
+
+            {chartPoints.length > 1 ? (
+              <div class="progress-chart-wrap">
+                <svg
+                  id="progress-chart-svg"
+                  class="progress-chart"
+                  viewBox={`0 0 ${CHART_W} ${CHART_H}`}
+                  preserveAspectRatio="none"
+                  data-pad-left={CHART_PAD.left}
+                  data-plot-w={chartPlotW}
+                >
+                  {chartYTicks.map(t => (
+                    <>
+                      <line class="chart-gridline" x1={CHART_PAD.left} x2={CHART_W - CHART_PAD.right} y1={chartY(t)} y2={chartY(t)} />
+                      <text class="chart-axis-label" x={CHART_PAD.left - 8} y={chartY(t)} text-anchor="end" dominant-baseline="middle">{Math.round(t)}h</text>
+                    </>
+                  ))}
+
+                  <line class="chart-target-line" x1={CHART_PAD.left} x2={CHART_W - CHART_PAD.right} y1={chartAvgY} y2={chartAvgY} />
+
+                  <polygon class="chart-area" points={areaPath} />
+                  <polyline class="chart-line" points={linePath} />
+
+                  {chartLastPoint && <circle class="chart-end-dot" cx={chartLastPoint.x} cy={chartLastPoint.y} r="4.5" />}
+                  {chartLastPoint && (
+                    <text class="chart-end-label" x={chartLastPoint.x} y={chartLastPoint.y - 10} text-anchor="end">{chartLastPoint.hours}h</text>
+                  )}
+
+                  <text class="chart-axis-label" x={CHART_PAD.left} y={CHART_H - 6} text-anchor="start">{weekSeries[0].label}</text>
+                  <text class="chart-axis-label" x={CHART_W - CHART_PAD.right} y={CHART_H - 6} text-anchor="end">{weekSeries[weekSeries.length - 1].label}</text>
+
+                  <line id="progress-chart-crosshair" class="chart-crosshair" x1="0" x2="0" y1={CHART_PAD.top} y2={CHART_H - CHART_PAD.bottom} />
+                  <circle id="progress-chart-hover-dot" class="chart-hover-dot" r="5" />
+                </svg>
+                <div id="progress-chart-tooltip" class="chart-tooltip">
+                  <span class="tt-value"></span>
+                  <span class="tt-date"></span>
+                </div>
+              </div>
+              <script type="application/json" id="progress-chart-data" is:inline set:html={JSON.stringify(chartPoints)} />
+            ) : (
+              <p class="chart-empty">Keep logging — your weekly trend shows up here once you have a second week.</p>
+            )}
+          </section>
+        </div>
+</div>
+
+  <!-- Period breakdown: the old Earnings page, opened from the tile above instead of its own tab -->
+  <div id="breakdown-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content breakdown-modal-content">
+      <div class="breakdown-header">
+        <div>
+          <h3>{isEarningsMode ? 'Earnings' : 'Hours'} Breakdown</h3>
+          <p class="modal-subtitle">
+            {isEarningsMode
+              ? 'Expected pay and payout status for each period.'
+              : 'Your logged hours grouped by month.'}
+          </p>
+        </div>
+        <button type="button" id="breakdown-close" class="breakdown-close" aria-label="Close">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+
+      {isEarningsMode && (
+        <div class="breakdown-total">
+          <span>Total Expected</span>
+          <strong id="breakdown-total-value">₱ {quickEarnings.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+        </div>
+      )}
+
+      <div id="breakdown-list" class="breakdown-list">
+        {periodRows.map(row => (
+          <div class="bd-row" data-label={row.label}>
+            <div class="bd-main">
+              <span class="bd-label">{row.label}</span>
+              <span class="bd-meta">
+                {!settings.isEmployee && settings.payType === 'daily' && isEarningsMode
+                  ? `${row.daysWorked} ${row.daysWorked === 1 ? 'day' : 'days'} worked · ${formatHours(row.rendered)}`
+                  : `${formatHours(row.rendered)} tracked`}
+                {row.carryOverIn !== 0 && isEarningsMode && (
+                  <span class={`bd-carry ${row.carryOverIn > 0 ? 'plus' : 'minus'}`}>
+                    {row.carryOverIn > 0 ? '+' : ''}₱{row.carryOverIn.toLocaleString('en-US', { maximumFractionDigits: 2 })} carry-over
+                  </span>
+                )}
+              </span>
+            </div>
+
+            {isEarningsMode ? (
+              <div class="bd-values">
+                <div class="bd-amount-group">
+                  <span class="bd-amount-label">{row.isAdjusted ? 'Received' : 'Expected'}</span>
+                  <span class={`bd-amount ${row.isAdjusted ? 'received' : ''}`}>
+                    ₱ {(row.isAdjusted ? row.actualReceived : row.totalExpected).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <div class="bd-actions">
+                  {!row.isAdjusted && (
+                    <button type="button" class="bd-btn-received" data-amount={row.totalExpected.toFixed(2)}>Received</button>
+                  )}
+                  <button type="button" class="bd-btn-edit" data-amount={(row.isAdjusted ? row.actualReceived : row.totalExpected).toFixed(2)}>Edit</button>
+                </div>
+                <div class="bd-edit" style="display: none;">
+                  <span class="bd-currency">₱</span>
+                  <input type="number" step="0.01" class="bd-edit-input" value={(row.isAdjusted ? row.actualReceived : row.totalExpected).toFixed(2)} />
+                  <button type="button" class="bd-btn-save">Save</button>
+                  <button type="button" class="bd-btn-cancel">Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <div class="bd-values">
+                <div class="bd-amount-group">
+                  <span class="bd-amount-label">Rendered</span>
+                  <span class="bd-amount">{formatHours(row.rendered)}</span>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+        {periodRows.length === 0 && (
+          <div class="bd-empty">No logs recorded for the current period yet.</div>
+        )}
+      </div>
+    </div>
+  </div>
+
+<script is:inline>
+  {
+  // The breakdown modal is position: fixed, so it can't live inside #dash-content (its entrance
+  // animation leaves a transform that would pin the modal to the card column).
+  const breakdownModal = document.getElementById('breakdown-modal');
+  if (breakdownModal) document.body.appendChild(breakdownModal);
+
+  // Weekly Activity arrows: every month is already on the page, so switch which one is shown
+  // instead of reloading. The URL keeps ?wm so a reload lands on the same month.
+  document.getElementById('weekly-activity')?.addEventListener('click', (e) => {
+    const link = e.target.closest('[data-wm-go]');
+    if (!link) return;
+    e.preventDefault();
+    const key = link.dataset.wmGo;
+    document.querySelectorAll('#weekly-activity [data-wm]').forEach((el) => {
+      el.hidden = el.dataset.wm !== key;
+    });
+    const url = new URL(window.location.href);
+    url.searchParams.set('wm', key);
+    history.replaceState(null, '', url);
+  });
+
+  // Period breakdown modal. Saving a payout shifts the carry-over into every later period, so the
+  // rows are re-fetched from the server rather than patched here — the money math stays in one place.
+  (() => {
+    const modal = document.getElementById('breakdown-modal');
+    const list = document.getElementById('breakdown-list');
+    if (!modal || !list) return;
+
+    const peso = (n) => `₱ ${Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const formatHours = (h) => {
+      const total = Math.round(h * 3600);
+      return `${String(Math.floor(total / 3600)).padStart(2, '0')}:${String(Math.floor((total % 3600) / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+    };
+
+    const open = () => { modal.style.display = 'flex'; document.body.style.overflow = 'hidden'; };
+    const close = () => { modal.style.display = 'none'; document.body.style.overflow = ''; };
+
+    document.querySelectorAll('.open-breakdown').forEach(btn => btn.addEventListener('click', open));
+    document.getElementById('breakdown-close')?.addEventListener('click', close);
+    modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && modal.style.display === 'flex') close();
+    });
+
+    async function refresh() {
+      const res = await fetch('/api/payouts');
+      if (!res.ok) return;
+      const data = await res.json();
+
+      const rows = data.rows.slice().reverse();
+      list.replaceChildren();
+
+      rows.forEach(row => {
+        const el = document.createElement('div');
+        el.className = 'bd-row';
+        el.dataset.label = row.label;
+
+        const amount = row.isAdjusted ? row.actualReceived : row.totalExpected;
+        const meta = !data.isEmployee && data.payType === 'daily' && data.isEarningsMode
+          ? `${row.daysWorked} ${row.daysWorked === 1 ? 'day' : 'days'} worked · ${formatHours(row.rendered)}`
+          : `${formatHours(row.rendered)} tracked`;
+
+        const main = document.createElement('div');
+        main.className = 'bd-main';
+        const label = document.createElement('span');
+        label.className = 'bd-label';
+        label.textContent = row.label;
+        const metaEl = document.createElement('span');
+        metaEl.className = 'bd-meta';
+        metaEl.textContent = meta;
+        if (row.carryOverIn !== 0 && data.isEarningsMode) {
+          const carry = document.createElement('span');
+          carry.className = `bd-carry ${row.carryOverIn > 0 ? 'plus' : 'minus'}`;
+          carry.textContent = `${row.carryOverIn > 0 ? '+' : ''}₱${Number(row.carryOverIn).toLocaleString('en-US', { maximumFractionDigits: 2 })} carry-over`;
+          metaEl.appendChild(carry);
+        }
+        main.append(label, metaEl);
+
+        const values = document.createElement('div');
+        values.className = 'bd-values';
+        values.innerHTML = data.isEarningsMode
+          ? `<div class="bd-amount-group">
+               <span class="bd-amount-label"></span>
+               <span class="bd-amount"></span>
+             </div>
+             <div class="bd-actions"></div>
+             <div class="bd-edit" style="display: none;">
+               <span class="bd-currency">₱</span>
+               <input type="number" step="0.01" class="bd-edit-input" />
+               <button type="button" class="bd-btn-save">Save</button>
+               <button type="button" class="bd-btn-cancel">Cancel</button>
+             </div>`
+          : `<div class="bd-amount-group">
+               <span class="bd-amount-label">Rendered</span>
+               <span class="bd-amount"></span>
+             </div>`;
+
+        if (data.isEarningsMode) {
+          values.querySelector('.bd-amount-label').textContent = row.isAdjusted ? 'Received' : 'Expected';
+          const amountEl = values.querySelector('.bd-amount');
+          amountEl.textContent = peso(amount);
+          amountEl.classList.toggle('received', row.isAdjusted);
+          values.querySelector('.bd-edit-input').value = Number(amount).toFixed(2);
+
+          const actions = values.querySelector('.bd-actions');
+          if (!row.isAdjusted) {
+            const received = document.createElement('button');
+            received.type = 'button';
+            received.className = 'bd-btn-received';
+            received.dataset.amount = Number(row.totalExpected).toFixed(2);
+            received.textContent = 'Received';
+            actions.appendChild(received);
+          }
+          const edit = document.createElement('button');
+          edit.type = 'button';
+          edit.className = 'bd-btn-edit';
+          edit.dataset.amount = Number(amount).toFixed(2);
+          edit.textContent = 'Edit';
+          actions.appendChild(edit);
+        } else {
+          values.querySelector('.bd-amount').textContent = formatHours(row.rendered);
+        }
+
+        el.append(main, values);
+        list.appendChild(el);
+      });
+
+      const total = data.rows.reduce((sum, r) => sum + r.calculated, 0);
+      const totalEl = document.getElementById('breakdown-total-value');
+      if (totalEl) totalEl.textContent = peso(total);
+    }
+
+    async function save(label, amount) {
+      const res = await fetch('/api/payouts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ periodLabel: label, amountReceived: amount }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        window.showToast(data.error || 'Could not save that payout', 'error');
+        return;
+      }
+      await refresh();
+      window.showToast('Payout updated', 'success');
+    }
+
+    list.addEventListener('click', (e) => {
+      const row = e.target.closest('.bd-row');
+      if (!row) return;
+      const label = row.dataset.label;
+
+      if (e.target.closest('.bd-btn-received')) {
+        save(label, parseFloat(e.target.closest('.bd-btn-received').dataset.amount));
+      } else if (e.target.closest('.bd-btn-edit')) {
+        row.querySelector('.bd-amount-group').style.display = 'none';
+        row.querySelector('.bd-actions').style.display = 'none';
+        row.querySelector('.bd-edit').style.display = 'flex';
+        row.querySelector('.bd-edit-input').focus();
+      } else if (e.target.closest('.bd-btn-cancel')) {
+        row.querySelector('.bd-amount-group').style.display = '';
+        row.querySelector('.bd-actions').style.display = '';
+        row.querySelector('.bd-edit').style.display = 'none';
+      } else if (e.target.closest('.bd-btn-save')) {
+        const value = parseFloat(row.querySelector('.bd-edit-input').value);
+        if (Number.isFinite(value)) save(label, value);
+      }
+    });
+  })();
+
+  // Progress Trend chart: crosshair + tooltip on hover/touch
+  (() => {
+    const svg = document.getElementById('progress-chart-svg');
+    const dataEl = document.getElementById('progress-chart-data');
+    if (!svg || !dataEl) return;
+
+    const points = JSON.parse(dataEl.textContent);
+    if (!points.length) return;
+
+    const crosshair = document.getElementById('progress-chart-crosshair');
+    const dot = document.getElementById('progress-chart-hover-dot');
+    const tooltip = document.getElementById('progress-chart-tooltip');
+    const padLeft = parseFloat(svg.dataset.padLeft);
+    const plotW = parseFloat(svg.dataset.plotW);
+
+    function nearestPoint(evt) {
+      const pt = svg.createSVGPoint();
+      pt.x = evt.clientX;
+      pt.y = evt.clientY;
+      const ctm = svg.getScreenCTM();
+      if (!ctm) return null;
+      const svgPoint = pt.matrixTransform(ctm.inverse());
+      const ratio = Math.min(1, Math.max(0, (svgPoint.x - padLeft) / plotW));
+      const idx = Math.round(ratio * (points.length - 1));
+      return points[idx];
+    }
+
+    function showAt(p) {
+      crosshair.setAttribute('x1', p.x);
+      crosshair.setAttribute('x2', p.x);
+      crosshair.style.opacity = '1';
+      dot.setAttribute('cx', p.x);
+      dot.setAttribute('cy', p.y);
+      dot.style.opacity = '1';
+
+      tooltip.querySelector('.tt-value').textContent = `${p.hours}h`;
+      tooltip.querySelector('.tt-date').textContent = p.date;
+      tooltip.style.opacity = '1';
+
+      const rect = svg.getBoundingClientRect();
+      const scale = rect.width / svg.viewBox.baseVal.width;
+      const left = Math.min(rect.width - 100, Math.max(0, p.x * scale - 50));
+      tooltip.style.left = left + 'px';
+      tooltip.style.top = Math.max(0, p.y * scale - 46) + 'px';
+    }
+
+    function hide() {
+      crosshair.style.opacity = '0';
+      dot.style.opacity = '0';
+      tooltip.style.opacity = '0';
+    }
+
+    svg.addEventListener('pointermove', (e) => {
+      const p = nearestPoint(e);
+      if (p) showAt(p);
+    });
+    svg.addEventListener('pointerleave', hide);
+  })();
+
+  // Lets the page script (tour steps point at these cards) know the stats are in.
+  window.__dashboardDataReady = true;
+  document.dispatchEvent(new Event('dashboard:data-ready'));
+  }
+</script>
+
+<style>
+  .dash-data { animation: cin .4s cubic-bezier(.16,1,.3,1) both; }
+  @keyframes cin { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
+  @keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+  .accent { background: var(--ntv-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+
+  .metrics-grid { 
+    display: grid; 
+    grid-template-columns: 1fr 1fr; 
+    gap: 20px; 
+    margin-bottom: 40px; 
+  }
+  .metrics-column { display: flex; flex-direction: column; gap: 20px; }
+  .metric-card { 
+    background: var(--card-bg); 
+    border: 1px solid var(--border-subtle); 
+    border-radius: 20px; 
+    padding: 22px; 
+    display: flex; 
+    flex-direction: column; 
+    gap: 16px; 
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); 
+  }
+  .metric-card:hover { border-color: rgba(237, 102, 33, 0.3); transform: translateY(-4px); box-shadow: 0 12px 30px rgba(0,0,0,0.2); }
+  
+  .highlight-card { border-color: rgba(96, 165, 250, 0.4); background: linear-gradient(145deg, var(--card-bg), rgba(96, 165, 250, 0.05)); box-shadow: 0 4px 20px rgba(96, 165, 250, 0.1); }
+  .highlight-card .metric-label { color: #60a5fa; }
+  .highlight-card.overtime { border-color: rgba(52, 211, 153, 0.4); background: linear-gradient(145deg, var(--card-bg), rgba(52, 211, 153, 0.05)); box-shadow: 0 4px 20px rgba(52, 211, 153, 0.1); }
+  .highlight-card.overtime .metric-label { color: #34d399; }
+  .highlight-card.overtime b { color: #34d399; }
+  
+  .metric-info { display: flex; flex-direction: column; gap: 8px; }
+  
+  @media (max-width: 900px) {
+    .metrics-grid { grid-template-columns: 1fr; }
+  }
+
+  .metric-icon { width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; }
+  .metric-icon.hours { background: rgba(237, 102, 33, 0.1); color: var(--ntv-orange); }
+  .metric-icon.remaining { background: rgba(96, 165, 250, 0.1); color: #60a5fa; }
+  .metric-label { font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; }
+  .metric-value { font-size: 24px; font-weight: 700; color: var(--text-primary); }
+  .metric-subtext { font-size: 11px; color: var(--text-secondary); margin-top: -4px; display: block; }
+  .metric-subtext b { color: #60a5fa; font-weight: 600; }
+  .unit { font-size: 14px; color: var(--text-secondary); font-weight: 500; }
+
+  .progress-track { width: 100%; height: 6px; background: rgba(255,255,255,0.05); border-radius: 3px; overflow: hidden; }
+  .progress-fill { height: 100%; background: var(--ntv-gradient); border-radius: 3px; transition: width 1s ease-out; }
+  .progress-fill.success { background: linear-gradient(90deg, #10b981, #34d399); }
+  .progress-status { display: flex; justify-content: space-between; margin-top: 8px; font-size: 11px; font-weight: 600; color: var(--text-secondary); }
+  .percent-val { color: var(--ntv-orange); font-weight: 800; font-size: 12px; }
+
+  .full-grid { width: 100%; display: flex; flex-direction: column; gap: 24px; }
+
+  .pace-badge { display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; font-size: 11px; font-weight: 700; width: fit-content; padding: 3px 9px; border-radius: 8px; }
+  .pace-badge.ahead { color: #34d399; background: rgba(52, 211, 153, 0.1); }
+  .pace-badge.behind { color: #f87171; background: rgba(248, 113, 113, 0.1); }
+
+  .hero-substats { display: flex; flex-wrap: wrap; gap: 24px; margin-top: 20px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,0.06); }
+  .hero-substat { display: flex; flex-direction: column; gap: 4px; }
+  .hero-substat-label { font-size: 10px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; }
+  .hero-substat-value { font-size: 16px; font-weight: 800; color: var(--text-primary); }
+
+  .quick-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(185px, 1fr)); gap: 16px; margin-bottom: 24px; align-items: stretch; }
+  .stat-tile { display: flex; flex-direction: column; background: var(--card-bg); border: 1px solid var(--border-subtle); border-radius: 16px; padding: 16px 18px; transition: all 0.2s; }
+  .stat-tile:hover { border-color: rgba(237, 102, 33, 0.3); }
+  .stat-head { display: flex; flex-direction: column; gap: 6px; }
+  .stat-label { font-size: 10px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; }
+  .stat-value { font-size: 20px; font-weight: 800; color: var(--text-primary); }
+  /* margin-top: auto keeps the divider lined up across tiles whose blurbs differ in length. */
+  .stat-explain { margin: auto 0 0; padding-top: 12px; border-top: 1px solid var(--border-subtle); font-size: 11px; line-height: 1.6; color: var(--text-secondary); }
+  .stat-explain-link {
+    color: var(--ntv-orange); font-weight: 700; text-decoration: none;
+    background: none; border: none; padding: 0; font-family: inherit; font-size: inherit; cursor: pointer;
+  }
+  .stat-explain-link:hover { text-decoration: underline; }
+
+  /* Period breakdown modal (replaces the old Earnings tab) */
+  .breakdown-modal-content { max-width: 640px !important; max-height: 86vh; display: flex; flex-direction: column; }
+  .breakdown-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+  .breakdown-header h3 { font-size: 19px; font-weight: 700; color: var(--text-primary); }
+  .breakdown-header .modal-subtitle { margin-bottom: 0; }
+  .breakdown-close {
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    width: 30px; height: 30px; border-radius: 8px; background: none; border: none;
+    color: var(--text-secondary); cursor: pointer; transition: all .2s;
+  }
+  .breakdown-close:hover { background: rgba(127,127,127,.12); color: var(--text-primary); }
+
+  .breakdown-total {
+    display: flex; align-items: center; justify-content: space-between;
+    margin: 18px 0 4px; padding: 12px 16px; border-radius: 12px;
+    background: rgba(237, 102, 33, 0.08); border: 1px solid rgba(237, 102, 33, 0.2);
+    font-size: 12px; font-weight: 700; color: var(--text-secondary);
+    text-transform: uppercase; letter-spacing: .05em;
+  }
+  .breakdown-total strong { font-size: 18px; color: var(--ntv-orange); text-transform: none; letter-spacing: 0; }
+
+  .breakdown-list { margin-top: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+  .bd-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    padding: 14px 16px; border-radius: 12px;
+    background: rgba(127,127,127,.05); border: 1px solid var(--border-subtle);
+  }
+  .bd-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .bd-label { font-size: 14px; font-weight: 700; color: var(--text-primary); }
+  .bd-meta { font-size: 11px; color: var(--text-secondary); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .bd-carry { font-weight: 700; padding: 2px 7px; border-radius: 6px; }
+  .bd-carry.plus { color: #34d399; background: rgba(52,211,153,.12); }
+  .bd-carry.minus { color: #f87171; background: rgba(248,113,113,.12); }
+
+  .bd-values { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+  .bd-amount-group { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+  .bd-amount-label { font-size: 9.5px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .06em; }
+  .bd-amount { font-size: 15px; font-weight: 800; color: var(--text-primary); white-space: nowrap; }
+  .bd-amount.received { color: #34d399; }
+  .bd-actions { display: flex; gap: 6px; }
+  .bd-btn-received, .bd-btn-edit, .bd-btn-save, .bd-btn-cancel {
+    font-family: inherit; font-size: 11.5px; font-weight: 700; padding: 7px 12px;
+    border-radius: 8px; cursor: pointer; transition: all .2s; border: 1px solid transparent;
+  }
+  .bd-btn-received, .bd-btn-save { background: var(--ntv-gradient); color: #fff; }
+  .bd-btn-received:hover, .bd-btn-save:hover { filter: brightness(1.1); }
+  .bd-btn-edit, .bd-btn-cancel {
+    background: rgba(127,127,127,.1); border-color: var(--border-subtle); color: var(--text-primary);
+  }
+  .bd-btn-edit:hover, .bd-btn-cancel:hover { background: rgba(127,127,127,.18); }
+  .bd-edit { display: flex; align-items: center; gap: 6px; }
+  .bd-currency { font-size: 13px; font-weight: 700; color: var(--text-secondary); }
+  .bd-edit-input {
+    width: 110px; padding: 7px 10px; border-radius: 8px;
+    background: rgba(127,127,127,.08); border: 1px solid var(--border-subtle);
+    color: var(--text-primary); font-family: inherit; font-size: 13px; outline: none;
+  }
+  .bd-edit-input:focus { border-color: var(--ntv-orange); }
+  .bd-empty {
+    text-align: center; padding: 28px; color: var(--text-secondary); font-size: 13px; font-style: italic;
+    background: rgba(127,127,127,.03); border: 1px dashed var(--border-subtle); border-radius: 12px;
+  }
+
+  @media (max-width: 600px) {
+    .bd-row { flex-direction: column; align-items: stretch; gap: 12px; }
+    .bd-values { justify-content: space-between; }
+    .bd-amount-group { align-items: flex-start; }
+  }
+
+  .weekly-chart-card { background: var(--card-bg); border: 1px solid var(--border-subtle); border-radius: 24px; padding: 24px; }
+  .chart-total { font-size: 12px; font-weight: 700; color: var(--text-secondary); }
+  .week-month-nav { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+  .week-month-btn {
+    display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px;
+    border-radius: 8px; border: 1px solid var(--border-subtle); background: rgba(127,127,127,.05);
+    color: var(--text-primary); transition: border-color .15s, color .15s;
+  }
+  a.week-month-btn:hover { border-color: rgba(237,102,33,.4); color: var(--ntv-orange); }
+  .week-month-btn.disabled { opacity: .3; }
+  .week-month-label { font-size: 13px; font-weight: 700; color: var(--text-primary); min-width: 120px; text-align: center; }
+  .week-month-today { margin-left: auto; font-size: 11px; font-weight: 700; color: var(--ntv-orange); text-decoration: none; }
+  .week-month-today:hover { text-decoration: underline; }
+  /* Horizontal week rows: each names the dates it covers, so "which days is this?" never comes up. */
+  .week-rows { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+  .week-row { display: grid; grid-template-columns: 120px 1fr auto; align-items: center; gap: 14px; }
+  .week-range { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; font-size: 12px; font-weight: 600; color: var(--text-secondary); white-space: nowrap; }
+  .week-row.current .week-range { color: var(--text-primary); }
+  .week-now {
+    font-size: 9px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase;
+    color: var(--ntv-orange); background: rgba(237,102,33,.14); padding: 2px 6px; border-radius: 5px; white-space: nowrap;
+  }
+  .week-track { height: 10px; background: rgba(127,127,127,.08); border-radius: 5px; overflow: hidden; }
+  .week-fill {
+    height: 100%; border-radius: 5px;
+    background: var(--ntv-gradient); transition: width .6s cubic-bezier(0.16,1,0.3,1);
+  }
+  /* A week with no logs shows an empty track, not a stub of colour. */
+  .week-fill.has-hours { min-width: 3px; }
+  .week-row:not(.current) .week-fill { opacity: .65; }
+  .week-figures { display: flex; align-items: baseline; gap: 8px; justify-content: flex-end; min-width: 116px; }
+  .week-hours { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 600; color: var(--text-primary); }
+  .week-days { font-size: 10.5px; color: var(--text-secondary); }
+
+  @media (max-width: 600px) {
+    .week-row { grid-template-columns: 96px 1fr; row-gap: 4px; }
+    .week-figures { grid-column: 2; justify-content: flex-start; min-width: 0; }
+  }
+
+  .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+  .section-header h2 { font-size: 18px; font-weight: 600; color: #fff; }
+
+  .progress-chart-card { background: var(--card-bg); border: 1px solid var(--border-subtle); border-radius: 24px; padding: 24px; }
+  .chart-legend { display: flex; gap: 16px; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; color: var(--text-secondary); }
+  .legend-swatch { width: 14px; height: 2px; border-radius: 2px; }
+  .legend-swatch.line { background: var(--ntv-orange); }
+  .legend-swatch.target { background: repeating-linear-gradient(90deg, #60a5fa 0 4px, transparent 4px 7px); }
+
+  .progress-chart-wrap { position: relative; }
+  .progress-chart { width: 100%; height: 220px; display: block; touch-action: none; }
+  .chart-gridline { stroke: rgba(255,255,255,0.06); stroke-width: 1; }
+  .chart-axis-label { font-size: 10px; fill: var(--text-secondary); font-family: inherit; }
+  .chart-target-line { stroke: #60a5fa; stroke-width: 1.5; stroke-dasharray: 4 3; opacity: 0.6; }
+  .chart-area { fill: var(--ntv-orange); fill-opacity: 0.08; stroke: none; }
+  .chart-line { fill: none; stroke: var(--ntv-orange); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  .chart-end-dot { fill: var(--ntv-orange); stroke: var(--card-bg); stroke-width: 2; }
+  .chart-end-label { font-size: 11px; font-weight: 700; fill: var(--text-primary); font-family: inherit; }
+  .chart-crosshair { stroke: rgba(255,255,255,0.25); stroke-width: 1; opacity: 0; pointer-events: none; }
+  .chart-hover-dot { fill: var(--ntv-orange); stroke: var(--card-bg); stroke-width: 2; opacity: 0; pointer-events: none; }
+
+  .chart-tooltip {
+    position: absolute; top: 0; left: 0; opacity: 0; pointer-events: none;
+    background: var(--modal-bg); border: 1px solid rgba(237, 102, 33, 0.3);
+    border-radius: 8px; padding: 6px 10px; display: flex; flex-direction: column; gap: 2px;
+    white-space: nowrap; transition: opacity 0.1s; z-index: 10;
+  }
+  .chart-tooltip .tt-value { font-size: 13px; font-weight: 800; color: var(--text-primary); }
+  .chart-tooltip .tt-date { font-size: 10px; color: var(--text-secondary); }
+
+  .chart-empty { text-align: center; padding: 32px; color: var(--text-secondary); font-size: 13px; font-style: italic; background: rgba(255,255,255,0.02); border-radius: 16px; border: 1px dashed rgba(255,255,255,0.1); }
+
+  /* Breakdown modal shell — same look as the page's other modals. */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(5, 11, 22, 0.85);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    z-index: 2000; display: flex; align-items: center; justify-content: center; padding: 20px;
+    animation: fadeIn .3s ease-out;
+  }
+  @keyframes fadeIn { from{opacity:0} to{opacity:1} }
+  @media (max-width: 768px) { .modal-overlay { padding: 0; } }
+  .modal-content {
+    background: var(--modal-bg); border: 1px solid rgba(237, 102, 33, 0.3); border-radius: 20px;
+    width: 100%; max-width: 440px; padding: 32px; position: relative;
+    animation: modalIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  @keyframes modalIn {
+    from { opacity: 0; transform: scale(0.95) translateY(10px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
+  }
+  .modal-subtitle { color: var(--text-secondary); font-size: 14px; margin-bottom: 24px; line-height: 1.5; }
+  /* The payout amount input picked up the setup form's number-input look; keep it. */
+  input[type="number"] {
+    background: rgba(255,255,255,0.04); border: 1.5px solid rgba(255,255,255,0.08);
+    border-radius: 12px; padding: 14px 18px; color: #fff; font-size: 14px;
+    font-family: inherit; outline: none; transition: all 0.2s; width: 100%;
+  }
+  input[type="number"]:focus {
+    border-color: var(--ntv-orange); background: rgba(237, 102, 33, 0.04);
+    box-shadow: 0 0 0 4px rgba(237, 102, 33, 0.1);
+  }
+</style>
