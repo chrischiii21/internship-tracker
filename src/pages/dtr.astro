@@ -657,17 +657,19 @@ const totalRequiredHours = settings.isEmployee ? 0 : settings.targetHours;
 
   // Switching month/year swaps just the sheet in place instead of reloading the whole page.
   // Section/student changes still navigate, since they rebuild the selectors themselves.
-  let latestMonthRequest = 0;
   const loadMonth = async (e) => {
     const url = buildUrl(e);
-    const requestId = ++latestMonthRequest;
     const sheet = document.getElementById("dtr-sheet");
-    if (sheet) sheet.style.opacity = "0.5";
+    // Selects stay locked until the new month lands, so two switches can't race each other.
+    mSel.disabled = ySel.disabled = true;
+    const hideLoader = window.showSectionLoading?.(
+      document.querySelector(".dtr-scroll-wrapper"),
+      `Loading ${mSel.options[mSel.selectedIndex].text} ${ySel.value}`
+    );
     try {
       const res = await fetch(url);
       if (!res.ok || res.redirected) throw new Error("fallback");
       const doc = new DOMParser().parseFromString(await res.text(), "text/html");
-      if (requestId !== latestMonthRequest) return; // a newer pick already took over
       const freshSheet = doc.getElementById("dtr-sheet");
       if (!sheet || !freshSheet) throw new Error("fallback");
       sheet.replaceWith(freshSheet);
@@ -683,7 +685,10 @@ const totalRequiredHours = settings.isEmployee ? 0 : settings.targetHours;
       bindGrid();
     } catch {
       window.location.href = url;
+      return; // leave the loader up while the full page load takes over
     }
+    hideLoader?.();
+    mSel.disabled = ySel.disabled = false;
   };
 
   secSel?.addEventListener("change", (e) => { window.location.href = buildUrl(e); });

@@ -94,6 +94,25 @@ const ogImageURL = new URL("/logo.png", Astro.site);
         }
       };
 
+      // In-place loader over one region (e.g. a month switch that refetches just the grid), so the
+      // rest of the page stays usable. Returns a function that removes it.
+      window.showSectionLoading = function(container, text) {
+        if (!container) return function() {};
+        const loader = document.createElement("div");
+        loader.className = "section-loader";
+        loader.setAttribute("role", "status");
+        loader.innerHTML = '<div class="premium-loader"><div class="spinner-ring"></div><div class="spinner-glow"></div></div><span class="section-loader-text"></span>';
+        loader.querySelector(".section-loader-text").textContent = text || "Loading...";
+        container.classList.add("section-loading");
+        container.setAttribute("aria-busy", "true");
+        container.appendChild(loader);
+        return function() {
+          loader.remove();
+          container.classList.remove("section-loading");
+          container.removeAttribute("aria-busy");
+        };
+      };
+
       window.hideLoadingSpinner = function() {
         const overlay = document.getElementById("fullscreen-loading-overlay");
         if (overlay) {
@@ -393,6 +412,36 @@ const ogImageURL = new URL("/logo.png", Astro.site);
     text-shadow: 0 0 20px rgba(255, 255, 255, 0.15);
     text-transform: uppercase;
     animation: textPulse 1.5s ease-in-out infinite;
+  }
+  .section-loading { position: relative; }
+  .section-loader {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 16px;
+    padding-top: min(140px, 25%);
+    background: color-mix(in srgb, var(--ntv-bg) 70%, transparent);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+    border-radius: inherit;
+    animation: sectionLoaderIn 0.15s ease-out;
+  }
+  .section-loader .premium-loader { width: 44px; height: 44px; margin-bottom: 0; }
+  .section-loader-text {
+    font-family: 'Outfit', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-primary);
+    animation: textPulse 1.5s ease-in-out infinite;
+  }
+  @keyframes sectionLoaderIn {
+    from { opacity: 0; }
   }
   @keyframes layoutSpin {
     from { transform: rotate(0deg); }
