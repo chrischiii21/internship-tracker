@@ -179,4 +179,33 @@ const navItems = allNavItems.filter(item => item.roles?.includes(role || 'studen
   document.getElementById('sidebar-close')?.addEventListener('click', () => {
     document.body.classList.remove('sidebar-open');
   });
+
+  // Clicking a tab switches to it right away: the tab lights up and the content area becomes a
+  // loader for that page while the browser fetches it, instead of the old page sitting there
+  // until the new one is fully built.
+  const nav = document.querySelector('#sidebar .sidebar-nav');
+  nav?.addEventListener('click', (e) => {
+    const link = e.target.closest('a.nav-item');
+    // Leave new-tab / new-window clicks alone.
+    if (!link || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    const main = document.getElementById('portal-main');
+    if (!main) return;
+
+    const previous = nav.querySelector('.active-nav');
+    previous?.classList.remove('active-nav');
+    link.classList.add('active-nav');
+    document.body.classList.remove('sidebar-open');
+    main.classList.add('tab-switching');
+    window.scrollTo(0, 0);
+    const hideLoader = window.showSectionLoading?.(main, `Loading ${link.textContent.trim()}`);
+
+    // Back/forward can restore this page from memory with the loader still up — undo it then.
+    window.addEventListener('pageshow', (ev) => {
+      if (!ev.persisted) return;
+      hideLoader?.();
+      main.classList.remove('tab-switching');
+      link.classList.remove('active-nav');
+      previous?.classList.add('active-nav');
+    }, { once: true });
+  });
 </script>
