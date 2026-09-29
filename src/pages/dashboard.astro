@@ -91,7 +91,9 @@ const shortDate = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', d
 
 const mondayThisWeekStr = manilaDayOffset(-(isoWeekdayOf(todayManila) - 1)).toISOString().split('T')[0];
 
-// Weekly Activity can browse back to past months via ?wm=YYYY-MM, bounded by start date and today.
+// Weekly Activity browses every month from the start date to today. All of them are rendered up
+// front and the arrows only switch which one is visible, so browsing never reloads the page;
+// ?wm=YYYY-MM picks the month shown first.
 const currentMonthKey = todayManila.slice(0, 7);
 const startMonthKey = (activeStartDate || todayManila).slice(0, 7);
 const firstMonthKey = startMonthKey < currentMonthKey ? startMonthKey : currentMonthKey;
@@ -101,55 +103,63 @@ const shiftMonthKey = (key: string, n: number) => {
   const [y, m] = key.split('-').map(Number);
   return new Date(Date.UTC(y, m - 1 + n, 1)).toISOString().slice(0, 7);
 };
-const prevMonthKey = selectedMonthKey > firstMonthKey ? shiftMonthKey(selectedMonthKey, -1) : null;
-const nextMonthKey = selectedMonthKey < currentMonthKey ? shiftMonthKey(selectedMonthKey, 1) : null;
-const selectedMonthLabel = new Date(`${selectedMonthKey}-01T00:00:00Z`).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
 
-const monthStartStr = `${selectedMonthKey}-01`;
-const mondayOfMonthStart = (() => {
-  const d = new Date(`${monthStartStr}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() - (isoWeekdayOf(monthStartStr) - 1));
-  return d;
-})();
-const [selectedYearNum, selectedMonthNum] = selectedMonthKey.split('-').map(Number);
-const daysInMonth = new Date(Date.UTC(selectedYearNum, selectedMonthNum, 0)).getUTCDate();
-const monthEndStr = `${selectedMonthKey}-${String(daysInMonth).padStart(2, '0')}`;
-const mondayOfMonthEnd = (() => {
-  const d = new Date(`${monthEndStr}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() - (isoWeekdayOf(monthEndStr) - 1));
-  return d;
-})();
-// Full month up front, so a week that hasn't happened yet shows as an empty row instead of not
-// existing at all.
-const weeksCount = Math.round((mondayOfMonthEnd.getTime() - mondayOfMonthStart.getTime()) / (7 * 86400000)) + 1;
+const buildWeekMonth = (monthKey: string) => {
+  const monthStartStr = `${monthKey}-01`;
+  const mondayOfMonthStart = new Date(`${monthStartStr}T00:00:00Z`);
+  mondayOfMonthStart.setUTCDate(mondayOfMonthStart.getUTCDate() - (isoWeekdayOf(monthStartStr) - 1));
+  const [yearNum, monthNum] = monthKey.split('-').map(Number);
+  const daysInMonth = new Date(Date.UTC(yearNum, monthNum, 0)).getUTCDate();
+  const monthEndStr = `${monthKey}-${String(daysInMonth).padStart(2, '0')}`;
+  const mondayOfMonthEnd = new Date(`${monthEndStr}T00:00:00Z`);
+  mondayOfMonthEnd.setUTCDate(mondayOfMonthEnd.getUTCDate() - (isoWeekdayOf(monthEndStr) - 1));
+  // Full month up front, so a week that hasn't happened yet shows as an empty row instead of not
+  // existing at all.
+  const weeksCount = Math.round((mondayOfMonthEnd.getTime() - mondayOfMonthStart.getTime()) / (7 * 86400000)) + 1;
 
-const monthWeeksData: { label: string, from: string, to: string, isCurrent: boolean, days: number, hours: number }[] =
-  Array.from({ length: weeksCount }, (_, i) => {
-    const start = new Date(mondayOfMonthStart);
-    start.setUTCDate(start.getUTCDate() + i * 7);
-    const end = new Date(start);
-    end.setUTCDate(end.getUTCDate() + 6);
-    const from = start.toISOString().split('T')[0];
-    return {
-      label: `${shortDate(start)} – ${shortDate(end)}`,
-      from,
-      to: end.toISOString().split('T')[0],
-      isCurrent: from === mondayThisWeekStr,
-      days: 0,
-      hours: 0,
-    };
+  const weeks: { label: string, from: string, to: string, isCurrent: boolean, days: number, hours: number }[] =
+    Array.from({ length: weeksCount }, (_, i) => {
+      const start = new Date(mondayOfMonthStart);
+      start.setUTCDate(start.getUTCDate() + i * 7);
+      const end = new Date(start);
+      end.setUTCDate(end.getUTCDate() + 6);
+      const from = start.toISOString().split('T')[0];
+      return {
+        label: `${shortDate(start)} – ${shortDate(end)}`,
+        from,
+        to: end.toISOString().split('T')[0],
+        isCurrent: from === mondayThisWeekStr,
+        days: 0,
+        hours: 0,
+      };
+    });
+
+  // Weekly Activity only counts a session once it's stopped — a running timer keeps ticking on
+  // the Today tile, but shouldn't inflate this week's row until it lands as a closed entry.
+  Object.entries(dailyHoursMap).forEach(([d, h]) => {
+    const week = weeks.find(w => d >= w.from && d <= w.to);
+    if (!week) return;
+    const closedH = d === liveDateStr ? Math.max(0, h - liveSeconds / 3600) : h;
+    week.hours += closedH;
+    if (closedH > 0) week.days++;
   });
 
-// Weekly Activity only counts a session once it's stopped — a running timer keeps ticking on
-// the Today tile, but shouldn't inflate this week's row until it lands as a closed entry.
-Object.entries(dailyHoursMap).forEach(([d, h]) => {
-  const week = monthWeeksData.find(w => d >= w.from && d <= w.to);
-  if (!week) return;
-  const closedH = d === liveDateStr ? Math.max(0, h - liveSeconds / 3600) : h;
-  week.hours += closedH;
-  if (closedH > 0) week.days++;
-});
-const maxWeekHours = Math.max(1, ...monthWeeksData.map(w => w.hours));
+  return {
+    key: monthKey,
+    label: new Date(`${monthStartStr}T00:00:00Z`).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' }),
+    weeks,
+    maxWeekHours: Math.max(1, ...weeks.map(w => w.hours)),
+    totalHours: Object.entries(dailyHoursMap)
+      .filter(([d]) => d.startsWith(monthKey))
+      .reduce((sum, [, h]) => sum + h, 0),
+    prevKey: monthKey > firstMonthKey ? shiftMonthKey(monthKey, -1) : null,
+    nextKey: monthKey < currentMonthKey ? shiftMonthKey(monthKey, 1) : null,
+  };
+};
+const weekMonths: ReturnType<typeof buildWeekMonth>[] = [];
+for (let key = firstMonthKey; key <= currentMonthKey; key = shiftMonthKey(key, 1)) {
+  weekMonths.push(buildWeekMonth(key));
+}
 const bestDayHours = Math.max(0, ...Object.values(dailyHoursMap));
 
 let currentStreak = 0;
@@ -195,9 +205,6 @@ const avgHoursPerDayOverall = renderedHours / daysSinceStart;
 const currentMonthPrefix = todayManila.slice(0, 7);
 const hoursThisMonth = Object.entries(dailyHoursMap)
   .filter(([d]) => d.startsWith(currentMonthPrefix))
-  .reduce((sum, [, h]) => sum + h, 0);
-const hoursSelectedMonth = Object.entries(dailyHoursMap)
-  .filter(([d]) => d.startsWith(selectedMonthKey))
   .reduce((sum, [, h]) => sum + h, 0);
 
 // Hours per week from program start to today — the total logged inside each week, not a running
@@ -837,35 +844,41 @@ if (!settings.isEmployee) {
           <section class="weekly-chart-card" id="weekly-activity">
             <div class="section-header">
               <h2>Weekly <span class="accent">Activity</span></h2>
-              <span class="chart-total">{formatHours(hoursSelectedMonth)} {selectedMonthKey === currentMonthKey ? 'this month' : 'total'}</span>
-            </div>
-            <div class="week-month-nav">
-              {prevMonthKey
-                ? <a class="week-month-btn" href={`?wm=${prevMonthKey}#weekly-activity`} aria-label="Previous month"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg></a>
-                : <span class="week-month-btn disabled" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg></span>}
-              <span class="week-month-label">{selectedMonthLabel}</span>
-              {nextMonthKey
-                ? <a class="week-month-btn" href={`?wm=${nextMonthKey}#weekly-activity`} aria-label="Next month"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg></a>
-                : <span class="week-month-btn disabled" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg></span>}
-              {selectedMonthKey !== currentMonthKey && <a class="week-month-today" href="/dashboard#weekly-activity">This month</a>}
-            </div>
-            <div class="week-rows">
-              {monthWeeksData.map(w => (
-                <div class={`week-row ${w.isCurrent ? 'current' : ''}`}>
-                  <div class="week-range">
-                    <span>{w.label}</span>
-                    {w.isCurrent && <span class="week-now">this week</span>}
-                  </div>
-                  <div class="week-track">
-                    <div class={`week-fill ${w.hours > 0 ? 'has-hours' : ''}`} style={`width: ${(w.hours / maxWeekHours) * 100}%`}></div>
-                  </div>
-                  <div class="week-figures">
-                    <span class="week-hours">{formatHours(w.hours)}</span>
-                    <span class="week-days">{w.days} {w.days === 1 ? 'day' : 'days'}</span>
-                  </div>
-                </div>
+              {weekMonths.map(m => (
+                <span class="chart-total" data-wm={m.key} hidden={m.key !== selectedMonthKey}>{formatHours(m.totalHours)} {m.key === currentMonthKey ? 'this month' : 'total'}</span>
               ))}
             </div>
+            {weekMonths.map(m => (
+              <div data-wm={m.key} hidden={m.key !== selectedMonthKey}>
+                <div class="week-month-nav">
+                  {m.prevKey
+                    ? <a class="week-month-btn" href={`?wm=${m.prevKey}#weekly-activity`} data-wm-go={m.prevKey} aria-label="Previous month"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg></a>
+                    : <span class="week-month-btn disabled" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg></span>}
+                  <span class="week-month-label">{m.label}</span>
+                  {m.nextKey
+                    ? <a class="week-month-btn" href={`?wm=${m.nextKey}#weekly-activity`} data-wm-go={m.nextKey} aria-label="Next month"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg></a>
+                    : <span class="week-month-btn disabled" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg></span>}
+                  {m.key !== currentMonthKey && <a class="week-month-today" href="/dashboard#weekly-activity" data-wm-go={currentMonthKey}>This month</a>}
+                </div>
+                <div class="week-rows">
+                  {m.weeks.map(w => (
+                    <div class={`week-row ${w.isCurrent ? 'current' : ''}`}>
+                      <div class="week-range">
+                        <span>{w.label}</span>
+                        {w.isCurrent && <span class="week-now">this week</span>}
+                      </div>
+                      <div class="week-track">
+                        <div class={`week-fill ${w.hours > 0 ? 'has-hours' : ''}`} style={`width: ${(w.hours / m.maxWeekHours) * 100}%`}></div>
+                      </div>
+                      <div class="week-figures">
+                        <span class="week-hours">{formatHours(w.hours)}</span>
+                        <span class="week-days">{w.days} {w.days === 1 ? 'day' : 'days'}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
           </section>
 
           <section class="progress-chart-card">
@@ -929,6 +942,21 @@ if (!settings.isEmployee) {
 
 <script is:inline>
   const params = new URLSearchParams(window.location.search);
+
+  // Weekly Activity arrows: every month is already on the page, so switch which one is shown
+  // instead of reloading. The URL keeps ?wm so a reload lands on the same month.
+  document.getElementById('weekly-activity')?.addEventListener('click', (e) => {
+    const link = e.target.closest('[data-wm-go]');
+    if (!link) return;
+    e.preventDefault();
+    const key = link.dataset.wmGo;
+    document.querySelectorAll('#weekly-activity [data-wm]').forEach((el) => {
+      el.hidden = el.dataset.wm !== key;
+    });
+    const url = new URL(window.location.href);
+    url.searchParams.set('wm', key);
+    history.replaceState(null, '', url);
+  });
   
   // Show How It Works modal if firstLogin param is true and not seen yet
   const isFirstLogin = params.get('firstLogin') === 'true';

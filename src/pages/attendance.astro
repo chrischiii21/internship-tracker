@@ -383,19 +383,50 @@ for (const d of days) {
   const mSel = document.getElementById("month-selector");
   const ySel = document.getElementById("year-selector");
 
-  const update = (e) => {
+  const buildUrl = (e) => {
     let url = `/attendance?month=${mSel.value}&year=${ySel.value}`;
     if (secSel?.value) url += `&section=${secSel.value}`;
     if (e?.target !== secSel && sSel?.value) url += `&studentId=${sSel.value}`;
     if (modeSel?.value) url += `&mode=${modeSel.value}`;
-    window.location.href = url;
+    return url;
+  };
+  const update = (e) => { window.location.href = buildUrl(e); };
+
+  // Switching month/year swaps just the calendar in place instead of reloading the whole page.
+  // The grid element itself stays (its click handlers live on it); only its cells are replaced.
+  let latestMonthRequest = 0;
+  const loadMonth = async (e) => {
+    const url = buildUrl(e);
+    const requestId = ++latestMonthRequest;
+    const grid = document.getElementById("calendar-grid");
+    const wrapper = document.querySelector(".calendar-wrapper");
+    if (grid) grid.style.opacity = "0.5";
+    try {
+      const res = await fetch(url);
+      if (!res.ok || res.redirected) throw new Error("fallback");
+      const doc = new DOMParser().parseFromString(await res.text(), "text/html");
+      if (requestId !== latestMonthRequest) return; // a newer pick already took over
+      const freshGrid = doc.getElementById("calendar-grid");
+      if (!grid || !wrapper || !freshGrid) throw new Error("fallback");
+      grid.replaceChildren(...freshGrid.childNodes);
+      grid.style.opacity = "";
+      wrapper.querySelector(".reason-summary")?.remove();
+      const freshReasons = doc.querySelector(".calendar-wrapper .reason-summary");
+      if (freshReasons) wrapper.append(freshReasons);
+      const subtitle = document.querySelector(".page-subtitle");
+      const freshSubtitle = doc.querySelector(".page-subtitle");
+      if (subtitle && freshSubtitle) subtitle.replaceChildren(...freshSubtitle.childNodes);
+      history.replaceState(null, "", url);
+    } catch {
+      window.location.href = url;
+    }
   };
 
   secSel?.addEventListener("change", update);
   sSel?.addEventListener("change", update);
   modeSel?.addEventListener("change", update);
-  mSel?.addEventListener("change", update);
-  ySel?.addEventListener("change", update);
+  mSel?.addEventListener("change", loadMonth);
+  ySel?.addEventListener("change", loadMonth);
 
   // That day's actual time-tracker sessions (manual + Clockify) — shown automatically, no extra
   // click: as a modal for the read-only coordinator view, inline in the popover for the editable one.
