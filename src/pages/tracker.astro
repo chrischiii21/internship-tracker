@@ -24,7 +24,9 @@ const activeStartDate = settings.isEmployee ? (settings.employeeStartDate || set
 
 let userInClockify = false;
 let clockifyEntries: any[] = [];
-if (settings.clockifyEnabled !== false) {
+// Clockify is a separate API, so it loads while the Supabase work below runs; awaited before use.
+const clockifyLoad = (async () => {
+  if (settings.clockifyEnabled === false) return;
   try {
     if (import.meta.env.CLOCKIFY_API_KEY) {
       const clockifyUser = await getClockifyUser(user.email);
@@ -36,7 +38,7 @@ if (settings.clockifyEnabled !== false) {
   } catch (e) {
     userInClockify = false;
   }
-}
+})();
 
 const convert12to24 = (timeStr: string, ampm: string) => {
   if (!timeStr) return '';
@@ -138,6 +140,7 @@ if (Astro.request.method === 'POST') {
 // Must run before getManualEntries: it can promote an open DTR punch-in out of `entries`.
 const activeTimer = await getActiveTimer(user.id, settings.isEmployee);
 const manualEntries = await getManualEntries(user.id, settings.isEmployee);
+await clockifyLoad;
 
 const startDateParam = Astro.url.searchParams.get('startDate') || '';
 const endDateParam = Astro.url.searchParams.get('endDate') || '';

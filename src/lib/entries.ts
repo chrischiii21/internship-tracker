@@ -131,7 +131,8 @@ export async function getTrackedEntries(
 ): Promise<{ date: string; durationSeconds: number }[]> {
   const collected: { date: string; durationSeconds: number }[] = [];
 
-  if (settings.clockifyEnabled !== false) {
+  const loadClockify = async () => {
+    if (settings.clockifyEnabled === false) return;
     try {
       const { getClockifyUser, getRenderedHours } = await import('./clockify');
       const clockifyUser = await getClockifyUser(email);
@@ -140,9 +141,9 @@ export async function getTrackedEntries(
         collected.push(...data.entries);
       }
     } catch (e) {}
-  }
+  };
 
-  const manual = await getManualEntries(userId, settings.isEmployee ?? false);
+  const [, manual] = await Promise.all([loadClockify(), getManualEntries(userId, settings.isEmployee ?? false)]);
   for (const entry of manual) {
     if (entry.date >= startDate) {
       collected.push({ date: entry.date, durationSeconds: entry.durationSeconds });
@@ -318,9 +319,11 @@ export async function stopTimer(
   userId: string,
   description: string,
   isEmployee: boolean = false,
-  punchOutTime?: string
+  punchOutTime?: string,
+  // The caller usually just read the timer; passing it skips a second identical lookup.
+  activeTimer?: ActiveTimer | null
 ) {
-  const timer = await getActiveTimer(userId, isEmployee);
+  const timer = activeTimer ?? await getActiveTimer(userId, isEmployee);
   if (!timer) throw new Error('No active timer found');
 
   // A plain Time In/Out punch has no task description — falls back to whatever the timer already

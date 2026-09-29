@@ -8,7 +8,6 @@ import { getClockifyUser, getDailyDTR } from "../lib/clockify";
 import { getAppSettings } from "../lib/settings";
 import { getManualEntries, getActiveTimer } from "../lib/entries";
 import { supabase } from "../lib/supabase";
-import { getStudentProgress } from "../lib/clockify";
 import { getOverridesForMonth } from "../lib/attendance";
 import { getShiftConfig } from "../lib/shift";
 
@@ -85,7 +84,13 @@ let dtrData: any = {};
 let totalMonthSeconds = 0;
 
 // Unified Logic: Combined Manual + Clockify
-const manual = await getManualEntries(viewUserId, settings.isEmployee ?? false);
+// Independent reads, fetched together instead of one round trip after another.
+const [manual, shiftConfig, overrides, clockifyUser] = await Promise.all([
+  getManualEntries(viewUserId, settings.isEmployee ?? false),
+  getShiftConfig(viewUserId),
+  getOverridesForMonth(viewUserId, settings.isEmployee ?? false, month, year),
+  isClockifySet && settings.clockifyEnabled !== false ? getClockifyUser(settings.userEmail || "").catch(() => null) : null,
+]);
 const manualFiltered = manual.filter((e) => {
   const d = new Date(e.startFull || `${e.date}T${e.startTime}+08:00`);
   return d.getMonth() + 1 === month && d.getFullYear() === year;
@@ -106,15 +111,8 @@ if (activeTimer) {
   }
 }
 
-let clockifyId = "";
-if (isClockifySet && settings.clockifyEnabled !== false) {
-  try {
-    const clockifyUser = await getClockifyUser(settings.userEmail || "");
-    if (clockifyUser) clockifyId = clockifyUser.id;
-  } catch (e) {}
-}
+const clockifyId = clockifyUser?.id || "";
 
-const shiftConfig = await getShiftConfig(viewUserId);
 const result = await getDailyDTR(clockifyId, month, year, manualFiltered, shiftConfig.shiftType);
 dtrData = result.days.reduce((acc, d) => {
   acc[d.day] = d;
@@ -129,7 +127,6 @@ const colGroup2Label = isStandardDayShift ? 'PM' : 'AFTER BREAK';
 // Days marked in the Attendance Chart that have no actual logged time yet. Present/WFH are flagged
 // as needing manual input (you claimed you worked, but there's nothing logged); Absent/SL/VL are
 // expected to have no log by definition, so they just get a quiet informational badge.
-const overrides = await getOverridesForMonth(viewUserId, settings.isEmployee ?? false, month, year);
 const overridesByDay: Record<number, { status: string; isHalfDay: boolean; reason: string | null }> = {};
 for (const o of overrides) {
   const d = parseInt(o.date.split('-')[2], 10);
@@ -138,9 +135,6 @@ for (const o of overrides) {
 const statusLabels: Record<string, string> = { absent: 'ABSENT', wfh: 'WFH', sl: 'SL', vl: 'VL', present: 'PRESENT' };
 const ACTIONABLE_STATUSES = new Set(['present', 'wfh']);
 
-// Calculate overall progress for the percentage display
-const overallRenderedHours = settings.isEmployee ? 0 : await getStudentProgress(viewUserId, settings.userEmail || "", settings.startDate);
-const progressPercent = settings.isEmployee ? "0" : Math.min(100, (overallRenderedHours / (settings.targetHours || 1)) * 100).toFixed(1);
 
 const formatDuration = (seconds: number) => {
   const h = Math.floor(seconds / 3600);

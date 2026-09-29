@@ -982,7 +982,7 @@ for (const d of days) {
   }
   .status-popover button:disabled:not(.is-loading),
   .modal-content button:disabled:not(.is-loading),
-  .holiday-row button:disabled:not(.is-loading) {
+  :global(.holiday-row button:disabled:not(.is-loading)) {
     opacity: 0.6; cursor: not-allowed;
   }
   .popover-header {
@@ -990,26 +990,28 @@ for (const d of days) {
     padding: 12px 16px; background: rgba(255, 255, 255, 0.02); border-bottom: 1px solid var(--border-subtle);
   }
   .popover-date { display: flex; align-items: center; gap: 8px; }
-  .popover-date-text { font-size: 13px; font-weight: 700; color: var(--text-primary); }
-  .popover-status-badge {
+  /* :global() on every selector below that targets markup built in the <script> via innerHTML /
+     createElement — that markup never gets Astro's data-astro-cid attribute, so scoped rules miss it. */
+  :global(.popover-date-text) { font-size: 13px; font-weight: 700; color: var(--text-primary); }
+  :global(.popover-status-badge) {
     font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: .03em;
     padding: 2px 8px; border-radius: 5px; color: var(--text-secondary);
     background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.12);
   }
-  .popover-status-badge.status-present { border-color: rgba(34, 197, 94, 0.4); color: var(--att-present); }
-  .popover-status-badge.status-absent { border-color: rgba(225, 29, 72, 0.4); color: var(--att-absent); }
-  .popover-status-badge.status-wfh { border-color: rgba(250, 204, 21, 0.4); color: var(--att-wfh); }
-  .popover-status-badge.status-sl { border-color: rgba(245, 158, 11, 0.4); color: var(--att-sl); }
-  .popover-status-badge.status-vl { border-color: rgba(139, 92, 246, 0.4); color: var(--att-vl); }
+  :global(.popover-status-badge.status-present) { border-color: rgba(34, 197, 94, 0.4); color: var(--att-present); }
+  :global(.popover-status-badge.status-absent) { border-color: rgba(225, 29, 72, 0.4); color: var(--att-absent); }
+  :global(.popover-status-badge.status-wfh) { border-color: rgba(250, 204, 21, 0.4); color: var(--att-wfh); }
+  :global(.popover-status-badge.status-sl) { border-color: rgba(245, 158, 11, 0.4); color: var(--att-sl); }
+  :global(.popover-status-badge.status-vl) { border-color: rgba(139, 92, 246, 0.4); color: var(--att-vl); }
   .popover-dismiss-btn {
     flex-shrink: 0; background: none; border: none; color: var(--text-secondary); cursor: pointer;
     padding: 2px; border-radius: 4px; display: flex; line-height: 0; transition: color 0.15s;
   }
   .popover-dismiss-btn:hover { color: var(--text-primary); }
   .popover-logs:empty { display: none; }
-  .popover-logs .day-logs-card { border: none; border-radius: 0; background: none; }
-  .popover-logs .day-logs-list { max-height: 240px; }
-  .popover-logs .day-details-loading, .popover-logs .day-details-empty { margin: 12px 16px 0; }
+  .popover-logs :global(.day-logs-card) { border: none; border-radius: 0; background: none; }
+  .popover-logs :global(.day-logs-list) { max-height: 240px; }
+  .popover-logs :global(.day-details-loading), .popover-logs :global(.day-details-empty) { margin: 12px 16px 0; }
   #popover-edit-section { padding: 14px 16px 16px; }
   #popover-edit-section.hidden { display: none; }
   .popover-buttons-label { font-size: 11px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; }
@@ -1073,13 +1075,13 @@ for (const d of days) {
     border-radius: 8px; padding: 10px 12px; color: var(--text-primary); font-size: 14px;
   }
   .holiday-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; max-height: 160px; overflow-y: auto; }
-  .holiday-row {
+  :global(.holiday-row) {
     display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-primary);
     background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 10px;
   }
-  .holiday-date { font-weight: 700; opacity: 0.8; }
-  .holiday-label { flex: 1; }
-  .holiday-remove-btn { background: none; border: none; color: var(--att-absent); font-size: 16px; cursor: pointer; line-height: 1; }
+  :global(.holiday-date) { font-weight: 700; opacity: 0.8; }
+  :global(.holiday-label) { flex: 1; }
+  :global(.holiday-remove-btn) { background: none; border: none; color: var(--att-absent); font-size: 16px; cursor: pointer; line-height: 1; }
   .holiday-add-row { display: flex; gap: 8px; }
   .holiday-add-row input {
     background: rgba(255,255,255,.03); border: 1px solid var(--border-subtle); border-radius: 8px;
@@ -1096,58 +1098,58 @@ for (const d of days) {
 
   /* Day details modal (time-tracker sessions for one day) */
   .day-details-content { max-width: 420px; }
-  .day-details-loading, .day-details-empty {
+  :global(.day-details-loading), :global(.day-details-empty) {
     font-size: 12.5px; color: var(--text-secondary); padding: 14px 12px; text-align: center;
     background: rgba(255,255,255,0.02); border: 1px dashed var(--border-subtle); border-radius: 10px;
   }
 
   /* Shared session list for the popover and the read-only modal — mirrors the Time Tracker's
      date-group card: one card, hairline-separated rows, mono times, orange mono hours. */
-  .day-logs-card {
+  :global(.day-logs-card) {
     background: rgba(5, 11, 22, 0.6); border: 1px solid var(--border-subtle);
     border-radius: 12px; overflow: hidden;
   }
-  .day-logs-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; max-height: 50vh; overflow-y: auto; }
-  .log-entry {
+  :global(.day-logs-list) { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; max-height: 50vh; overflow-y: auto; }
+  :global(.log-entry) {
     display: flex; justify-content: space-between; align-items: center; gap: 12px;
     padding: 12px 16px; border-bottom: 1px solid rgba(255, 255, 255, 0.03);
     transition: background-color 0.15s;
   }
-  .log-entry:hover { background: rgba(237, 102, 33, 0.03); }
-  .day-logs-list > li:last-child { border-bottom: none; }
-  .log-entry-info { min-width: 0; }
-  .log-entry-title-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
-  .log-entry-desc {
+  :global(.log-entry:hover) { background: rgba(237, 102, 33, 0.03); }
+  :global(.day-logs-list > li:last-child) { border-bottom: none; }
+  :global(.log-entry-info) { min-width: 0; }
+  :global(.log-entry-title-row) { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  :global(.log-entry-desc) {
     font-size: 13px; font-weight: 600; color: var(--text-primary);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .log-entry-time { display: block; font-size: 11px; color: var(--text-secondary); font-family: 'JetBrains Mono', monospace; }
-  .log-entry-duration {
+  :global(.log-entry-time) { display: block; font-size: 11px; color: var(--text-secondary); font-family: 'JetBrains Mono', monospace; }
+  :global(.log-entry-duration) {
     flex-shrink: 0; font-size: 14px; font-weight: 700; color: var(--ntv-orange);
     font-family: 'JetBrains Mono', monospace;
   }
-  .log-source-badge {
+  :global(.log-source-badge) {
     flex-shrink: 0; font-size: 9px; font-weight: 800; padding: 2px 6px; border-radius: 4px;
     text-transform: uppercase; letter-spacing: 0.02em;
   }
-  .log-source-badge.clockify { background: rgba(96, 165, 250, 0.1); color: #60a5fa; border: 1px solid rgba(96, 165, 250, 0.2); }
-  .log-source-badge.manual { background: rgba(237, 102, 33, 0.1); color: var(--ntv-orange); border: 1px solid rgba(237, 102, 33, 0.2); }
+  :global(.log-source-badge.clockify) { background: rgba(96, 165, 250, 0.1); color: #60a5fa; border: 1px solid rgba(96, 165, 250, 0.2); }
+  :global(.log-source-badge.manual) { background: rgba(237, 102, 33, 0.1); color: var(--ntv-orange); border: 1px solid rgba(237, 102, 33, 0.2); }
 
-  .log-break-divider { display: flex; align-items: center; gap: 10px; padding: 4px 16px; }
-  .log-break-line {
+  :global(.log-break-divider) { display: flex; align-items: center; gap: 10px; padding: 4px 16px; }
+  :global(.log-break-line) {
     flex: 1; height: 1px;
     background: repeating-linear-gradient(90deg, rgba(255,255,255,0.12) 0, rgba(255,255,255,0.12) 4px, transparent 4px, transparent 8px);
   }
-  .log-break-label {
+  :global(.log-break-label) {
     font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
     color: var(--text-secondary); opacity: 0.7; white-space: nowrap;
   }
-  .day-logs-total {
+  :global(.day-logs-total) {
     display: flex; justify-content: space-between; align-items: center;
     padding: 12px 16px; background: rgba(255, 255, 255, 0.02); border-top: 1px solid var(--border-subtle);
   }
-  .day-logs-total span:first-child { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-secondary); }
-  .day-logs-total span:last-child { font-size: 14px; font-weight: 700; color: var(--ntv-orange); font-family: 'JetBrains Mono', monospace; }
+  :global(.day-logs-total span:first-child) { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-secondary); }
+  :global(.day-logs-total span:last-child) { font-size: 14px; font-weight: 700; color: var(--ntv-orange); font-family: 'JetBrains Mono', monospace; }
 
   @media (max-width: 900px) {
     #portal-main { margin-left: 0; padding: 24px 16px; width: 100%; overflow-x: hidden; }

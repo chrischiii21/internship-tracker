@@ -44,7 +44,7 @@ export async function getRenderedHours(clockifyUserId: string, startDate?: strin
   const workspaceId = import.meta.env.CLOCKIFY_WORKSPACE_ID;
   let totalSeconds = 0;
   let page = 1;
-  const pageSize = 50;
+  const pageSize = 1000; // one request for most histories instead of one per 50 entries, in series
   let hasMore = true;
   const allEntries: { date: string, durationSeconds: number }[] = [];
 
@@ -83,12 +83,6 @@ export async function getRenderedHours(clockifyUserId: string, startDate?: strin
 // This used to read a `rendered_hours` column that nothing in the app ever writes, so manual
 // entries were invisible to every progress figure.
 export async function getStudentProgress(userId: string, email: string, startDate?: string, isEmployee = false) {
-  const { data: settings } = await supabase
-    .from('student_settings')
-    .select('clockify_enabled')
-    .eq('user_id', userId)
-    .single();
-
   let query = supabase
     .from('entries')
     .select('duration_seconds')
@@ -99,7 +93,10 @@ export async function getStudentProgress(userId: string, email: string, startDat
     query = query.gte('start_time', new Date(`${startDate}T00:00:00+08:00`).toISOString());
   }
 
-  const { data: rows } = await query;
+  const [{ data: settings }, { data: rows }] = await Promise.all([
+    supabase.from('student_settings').select('clockify_enabled').eq('user_id', userId).single(),
+    query,
+  ]);
   const loggedHours = (rows || []).reduce((sum: number, row: any) => sum + (row.duration_seconds || 0), 0) / 3600;
 
   let clockifyHours = 0;
@@ -326,7 +323,7 @@ export async function getClockifyDetailedEntries(clockifyUserId: string, startDa
   if (!clockifyUserId || !apiKey || !workspaceId) return [];
 
   let page = 1;
-  const pageSize = 50;
+  const pageSize = 1000; // one request for most histories instead of one per 50 entries, in series
   let hasMore = true;
   const allEntries: any[] = [];
 

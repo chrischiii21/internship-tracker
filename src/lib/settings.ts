@@ -50,12 +50,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
 };
 
 export async function getAppSettings(userId: string): Promise<AppSettings> {
-  // Check Coordinator table first
-  const { data: coordData } = await supabase
-    .from('coordinator_settings')
-    .select('*')
-    .eq('user_id', userId)
-    .single();
+  // Both tables in one round trip; a coordinator row still wins over a student row.
+  const [{ data: coordData }, { data: studentData }] = await Promise.all([
+    supabase.from('coordinator_settings').select('*').eq('user_id', userId).single(),
+    supabase.from('student_settings').select('*, coordinator_sections(section_name)').eq('user_id', userId).single(),
+  ]);
 
   if (coordData) {
     return {
@@ -68,13 +67,6 @@ export async function getAppSettings(userId: string): Promise<AppSettings> {
       setupComplete: true
     };
   }
-
-  // Check Student table
-  const { data: studentData } = await supabase
-    .from('student_settings')
-    .select('*, coordinator_sections(section_name)')
-    .eq('user_id', userId)
-    .single();
 
   if (studentData) {
     return {

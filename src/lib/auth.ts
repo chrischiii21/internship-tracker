@@ -1,4 +1,6 @@
-import { google } from 'googleapis';
+// googleapis takes ~0.6s to import and every page loads this file for getSession, so it is
+// loaded only on the sign-in routes that actually use it.
+const loadGoogle = () => import('googleapis').then((m) => m.google);
 
 const SCOPES = [
   'https://www.googleapis.com/auth/userinfo.email',
@@ -9,7 +11,8 @@ import { supabase } from './supabase';
 
 // ... SCOPES and other functions remain same ...
 
-export function getOAuth2Client(origin?: string) {
+export async function getOAuth2Client(origin?: string) {
+  const google = await loadGoogle();
   // Use the origin from the request if available, otherwise fallback to the environment variable
   const redirectUri = origin 
     ? new URL('/api/auth/callback', origin).toString()
@@ -22,8 +25,8 @@ export function getOAuth2Client(origin?: string) {
   );
 }
 
-export function getAuthUrl(origin?: string) {
-  const client = getOAuth2Client(origin);
+export async function getAuthUrl(origin?: string) {
+  const client = await getOAuth2Client(origin);
   return client.generateAuthUrl({
     access_type: 'offline',
     scope: SCOPES,
@@ -32,7 +35,8 @@ export function getAuthUrl(origin?: string) {
 }
 
 export async function getUserFromCode(code: string, origin?: string) {
-  const client = getOAuth2Client(origin);
+  const google = await loadGoogle();
+  const client = await getOAuth2Client(origin);
   try {
     const { tokens } = await client.getToken(code);
     client.setCredentials(tokens);

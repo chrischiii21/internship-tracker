@@ -40,7 +40,7 @@ export const POST: APIRoute = async ({ request }) => {
     const existing = await getActiveTimer(session.id, isEmployee);
 
     if (existing) {
-      const result = await stopTimer(session.id, '', isEmployee, punchTime);
+      const result = await stopTimer(session.id, '', isEmployee, punchTime, existing);
       const hours = (result.durationSeconds / 3600).toFixed(2);
       const { addSyncLog } = await import('../../../lib/logs');
       await addSyncLog({
