@@ -432,7 +432,9 @@ const ogImageURL = new URL("/logo.png", Astro.site);
   }
   .section-loader .premium-loader { width: 44px; height: 44px; margin-bottom: 0; }
   /* Tab switch in progress (Sidebar): hide the old page so only the loader for the new one shows. */
-  .tab-switching > :not(.section-loader):not(.bg-grid) { visibility: hidden; }
+  /* display, not visibility: cards with `transition: all` would animate a visibility change and
+     linger on top of the loader instead of disappearing at once. */
+  .tab-switching > :not(.section-loader):not(.bg-grid) { display: none !important; }
   .tab-switching > .section-loader { background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; }
   .section-loader-text {
     font-family: 'Outfit', sans-serif;
