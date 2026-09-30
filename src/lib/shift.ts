@@ -57,6 +57,20 @@ export function shiftLengthSeconds(config: ShiftConfig): number {
   return length > 0 ? length : 8 * 3600;
 }
 
+// When a session that began at `start` is due to end: the next time this shift ends after it (6 AM
+// the next morning on a 9 PM – 6 AM shift). A session begun far outside shift hours — the next end
+// is more than a shift plus `slackSeconds` away — gets one shift's length instead. Manila has no
+// DST, so the fixed +08:00 offset is exact.
+export function scheduledShiftEnd(config: ShiftConfig, start: Date, slackSeconds: number): Date {
+  const length = shiftLengthSeconds(config);
+  const day = start.toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
+  let end = new Date(`${day}T${config.shiftEnd}:00+08:00`);
+  if (end.getTime() <= start.getTime()) end = new Date(end.getTime() + 86400 * 1000);
+  return end.getTime() - start.getTime() <= (length + slackSeconds) * 1000
+    ? end
+    : new Date(start.getTime() + length * 1000);
+}
+
 export async function saveShiftConfig(userId: string, config: ShiftConfig): Promise<void> {
   const { error } = await supabase
     .from('shift_config')

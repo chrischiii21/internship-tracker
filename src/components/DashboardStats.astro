@@ -393,10 +393,8 @@ if (!settings.isEmployee) {
               {liveStartedToday
                 ? `Counting up live — ${todayEntryCount} closed ${todayEntryCount === 1 ? 'entry' : 'entries'} today plus the session running now.`
                 : `${todayEntryCount} ${todayEntryCount === 1 ? 'entry' : 'entries'} logged today. Time In from the header to start counting.`}
+              {liveStartedToday && <span class="stat-explain-line" id="today-eta">&nbsp;</span>}
             </p>
-            {liveStartedToday && (
-              <p class="stat-explain" id="today-eta">&nbsp;</p>
-            )}
           </div>
           <script is:inline define:vars={{ DAILY_TARGET_SECONDS: 8 * 3600 }}>
             // Keeps the Today tile ticking while a session is open. Time In/Out reloads the page,
@@ -451,18 +449,12 @@ if (!settings.isEmployee) {
           </div>
 
           {settings.isEmployee ? (
-            <div class="stat-tile" data-tour="earnings-tile" id="alloc-tile" data-monthly={allocMonthly} data-per={allocPer} data-next-payday={allocNextPayday}>
+            <div class="stat-tile">
               <div class="stat-head">
-                <span class="stat-label">Salary Allocation</span>
-                <span class="stat-value" id="alloc-tile-amount">₱{allocGross.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span>
+                <span class="stat-label">Best Day</span>
+                <span class="stat-value">{formatHours(bestDayHours)}</span>
               </div>
-              <div class="alloc-bar" id="alloc-tile-bar"></div>
-              <ul class="alloc-legend" id="alloc-tile-legend"></ul>
-              <p class="stat-explain">
-                <span id="alloc-tile-period">{allocPer === 'kinsena' ? `${allocNextPayday}th kinsena — your next payday.` : 'Per month.'}</span>
-                {' '}<button type="button" class="stat-explain-link" id="open-alloc">Plan allocation →</button>
-                {' '}<button type="button" class="stat-explain-link open-breakdown">Payouts →</button>
-              </p>
+              <p class="stat-explain">Your single best day out of {activeDaysCount} active day(s) logged so far.</p>
             </div>
           ) : isEarningsMode ? (
             <div class="stat-tile" data-tour="earnings-tile">
@@ -490,6 +482,28 @@ if (!settings.isEmployee) {
             </div>
           )}
         </div>
+
+        {settings.isEmployee && (
+          <section class="alloc-strip" data-tour="earnings-tile" id="alloc-tile" data-monthly={allocMonthly} data-per={allocPer} data-next-payday={allocNextPayday}>
+            <div class="alloc-strip-head">
+              <div class="alloc-tile-title">
+                <span class="stat-label">Salary Allocation</span>
+                <span class="alloc-tile-tag" id="alloc-tile-period">{allocPer === 'kinsena' ? `Next: ${allocNextPayday}th` : 'Per month'}</span>
+              </div>
+              <div class="alloc-strip-links">
+                <button type="button" class="stat-explain-link" id="open-alloc">Plan allocation →</button>
+                <button type="button" class="stat-explain-link open-breakdown">Payouts →</button>
+              </div>
+            </div>
+            <div class="alloc-strip-body">
+              <span class="stat-value" id="alloc-tile-amount">₱{allocGross.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span>
+              <div>
+                <div class="alloc-bar" id="alloc-tile-bar"></div>
+                <ul class="alloc-legend" id="alloc-tile-legend"></ul>
+              </div>
+            </div>
+          </section>
+        )}
 
         <div class="full-grid">
           <section class="weekly-chart-card" id="weekly-activity">
@@ -1098,8 +1112,9 @@ if (!settings.isEmployee) {
       ensurePlan(k);
       const pay = payOf(k);
       document.getElementById('alloc-tile-amount').textContent = peso(pay);
-      document.getElementById('alloc-tile-period').textContent =
-        k === 'month' ? 'Per month.' : `${k}th kinsena — your next payday.`;
+      const tag = document.getElementById('alloc-tile-period');
+      tag.textContent = k === 'month' ? 'Per month' : `Next: ${k}th`;
+      tag.title = k === 'month' ? 'Planned per month' : `Your next payday is the ${k}th kinsena`;
       document.getElementById('alloc-tile-bar').replaceChildren(...state.plans[k].map(b => {
         const seg = document.createElement('span');
         seg.style.width = `${pay ? amountOf(b, pay) / pay * 100 : 0}%`;
@@ -1467,6 +1482,7 @@ if (!settings.isEmployee) {
     background: none; border: none; padding: 0; font-family: inherit; font-size: inherit; cursor: pointer;
   }
   .stat-explain-link:hover { text-decoration: underline; }
+  .stat-explain-line { display: block; margin-top: 6px; }
 
   /* Period breakdown modal (replaces the old Earnings tab) */
   .breakdown-modal-content { max-width: 640px !important; max-height: 86vh; display: flex; flex-direction: column; }
@@ -1540,9 +1556,29 @@ if (!settings.isEmployee) {
   /* Salary allocation tile + calculator (employees) */
   .alloc-bar { display: flex; gap: 2px; height: 8px; margin-top: 12px; border-radius: 4px; overflow: hidden; background: rgba(127,127,127,.1); }
   .alloc-bar > :global(span) { flex-shrink: 0; height: 100%; transition: width .3s; }
-  .alloc-legend { list-style: none; margin: 10px 0 12px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-  .alloc-legend li { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-secondary); }
-  .alloc-legend-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .alloc-legend { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 16px; }
+  .alloc-legend li { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-secondary); white-space: nowrap; }
+  .alloc-legend-name { max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
+  .alloc-tile-title { display: flex; align-items: center; gap: 8px; }
+  /* Salary allocation strip: same card as the stat tiles, in its own full-width row — it has more to
+     show (the split and where each part goes) than a tile holds, and would stretch every tile beside
+     it. Bar and legend are filled in client-side. */
+  .alloc-strip {
+    background: var(--card-bg); border: 1px solid var(--border-subtle); border-radius: 16px;
+    padding: 16px 18px; margin-bottom: 24px; transition: all 0.2s;
+  }
+  .alloc-strip:hover { border-color: rgba(237, 102, 33, 0.3); }
+  .alloc-strip-head { display: flex; align-items: center; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; }
+  .alloc-strip-links { display: flex; gap: 16px; font-size: 11.5px; }
+  .alloc-strip-body { display: grid; grid-template-columns: minmax(110px, auto) 1fr; align-items: center; gap: 8px 24px; margin-top: 8px; }
+  .alloc-strip .alloc-bar { margin-top: 0; }
+  @media (max-width: 600px) {
+    .alloc-strip-body { grid-template-columns: 1fr; }
+  }
+  .alloc-tile-tag {
+    font-size: 9px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; white-space: nowrap;
+    color: var(--ntv-orange); background: rgba(237,102,33,.14); padding: 2px 6px; border-radius: 5px;
+  }
   .alloc-legend-amount { font-weight: 700; color: var(--text-primary); }
   .alloc-legend .acct-logo { width: 14px; height: 14px; border-radius: 4px; font-size: 6.5px; }
   .alloc-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }

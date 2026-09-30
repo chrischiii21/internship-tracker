@@ -642,7 +642,9 @@ const { user } = Astro.props;
         const res = await fetch('/api/timer/toggle', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ time }),
+          // Says which button was pressed: a page left open overnight can still show Time Out
+          // for a timer that has since been auto-stopped at the end of the shift.
+          body: JSON.stringify({ time, mode: punchMode }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Failed to toggle timer');
@@ -650,9 +652,9 @@ const { user } = Astro.props;
 
         // Pages that render timer-dependent server data (e.g. the Dashboard's task timer card)
         // need a fresh render to stay in sync with this client-only toggle.
-        if (data.capped) {
-          // A forgotten timer was trimmed to one shift — hold the reload back so the explanation
-          // is actually readable before the page repaints.
+        if (data.capped || data.stale) {
+          // A forgotten timer was cut at the shift's end, or the page was out of date — hold the
+          // reload back so the explanation is actually readable before the page repaints.
           window.hideLoadingSpinner?.();
           window.showToast?.(data.message, 'error');
           setTimeout(() => window.location.reload(), 6000);

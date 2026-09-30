@@ -39,16 +39,35 @@ export const POST: APIRoute = async ({ request }) => {
     const isEmployee = settings.isEmployee ?? false;
     const existing = await getActiveTimer(session.id, isEmployee);
 
+    // The page may be stale — e.g. showing Time Out for a timer auto-stopped at the end of the shift
+    // (getActiveTimer just did that). Act on what the user pressed, not a blind flip.
+    const mode = body?.mode === 'in' || body?.mode === 'out' ? body.mode : null;
+    if (mode && (mode === 'out') !== !!existing) {
+      return new Response(JSON.stringify({
+        success: true,
+        active: !!existing,
+        startTime: existing?.startTime ?? null,
+        stale: true,
+        message: existing
+          ? "You're already timed in — the timer was started from another page or device."
+          : 'Your timer had already stopped at the end of your shift. Check your DTR if you worked later.',
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
     if (existing) {
       const result = await stopTimer(session.id, '', isEmployee, punchTime, existing);
       const hours = (result.durationSeconds / 3600).toFixed(2);
+      const shiftEndLabel = new Date(result.endTime).toLocaleString('en-US', { timeZone: 'Asia/Manila', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
       const { addSyncLog } = await import('../../../lib/logs');
       await addSyncLog({
         userId: session.id,
         type: 'Sync',
         status: result.capped ? 'Warning' : 'Success',
         details: result.capped
-          ? `Timed out — timer had been left running since ${new Date(result.startTime).toLocaleString('en-US', { timeZone: 'Asia/Manila' })}; saved one shift (${hours}h) instead of the full gap`
+          ? `Timed out — timer ran more than 4h past the shift, so it was saved up to the shift's end (${shiftEndLabel}, ${hours}h)`
           : (punchTime ? `Timed out at ${punchTime} (matched to attendance tap)` : 'Timed out'),
       });
       return new Response(JSON.stringify({
@@ -56,7 +75,7 @@ export const POST: APIRoute = async ({ request }) => {
         active: false,
         capped: result.capped,
         message: result.capped
-          ? `That timer had been running since ${new Date(result.startTime).toLocaleDateString('en-US', { timeZone: 'Asia/Manila', month: 'short', day: 'numeric' })}. Saved one shift (${hours}h) — edit that day on your DTR if the real time-out was different.`
+          ? `That timer ran more than 4 hours past your shift, so it was saved up to your shift's end (${shiftEndLabel}, ${hours}h). Edit that day on your DTR if you worked later.`
           : null,
       }), {
         status: 200,

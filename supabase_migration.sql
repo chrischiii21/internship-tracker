@@ -113,9 +113,10 @@ DELETE FROM public.sessions WHERE expires_at < NOW();
 -- --------------------------------------------------------------------------
 -- 6. Stale running timers  (REVIEW — the app now handles these safely)
 -- --------------------------------------------------------------------------
--- 12 timers were still running, the oldest since June. stopTimer() now caps any session over 24h
--- to one shift's length rather than banking the whole gap, so these are no longer dangerous — the
--- owner just gets one shift logged on the day they clocked in, with a message to correct it.
+-- 12 timers were still running, the oldest since June. The app now stops a forgotten timer at the
+-- end of its owner's shift (src/lib/entries.ts): once it has run more than 4h past the shift, the
+-- next read of it — any page, the header, a coordinator's view — closes it at the shift's end and
+-- notes that in the owner's sync log. These clear themselves as their owners come back.
 -- To see them:
 --
 --   SELECT user_id, is_employee, start_time, NOW() - start_time AS running_for

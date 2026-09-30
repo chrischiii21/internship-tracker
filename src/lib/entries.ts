@@ -183,7 +183,7 @@ async function findOpenManualEntryToday(userId: string, isEmployee: boolean) {
   return latest.duration_seconds === 0 ? latest : null;
 }
 
-export async function getActiveTimer(userId: string, isEmployee: boolean = false): Promise<ActiveTimer | null> {
+async function readActiveTimer(userId: string, isEmployee: boolean): Promise<ActiveTimer | null> {
   try {
     const { data, error } = await supabase
       .from('active_timers')
@@ -233,6 +233,38 @@ export async function getActiveTimer(userId: string, isEmployee: boolean = false
   }
 }
 
+// The running timer — stopped first if it was left running past its shift. There's no scheduler, so
+// the first read after the cutoff (any page, the header, a coordinator's view) does the stopping; the
+// entry still ends at the shift's end, exactly as if it had stopped on time.
+export async function getActiveTimer(userId: string, isEmployee: boolean = false): Promise<ActiveTimer | null> {
+  const timer = await readActiveTimer(userId, isEmployee);
+  if (!timer) return null;
+
+  try {
+    const start = new Date(timer.startTime);
+    const now = new Date();
+    const shiftEnd = await forgottenAt(userId, start, now);
+    if (!shiftEnd) return timer;
+
+    const seconds = await closeTimer(userId, isEmployee, timer, shiftEnd, timer.description || 'Present');
+    if (seconds !== null) {
+      const hoursPast = ((now.getTime() - shiftEnd.getTime()) / 3600000).toFixed(1);
+      const { addSyncLog } = await import('./logs');
+      await addSyncLog({
+        userId,
+        type: 'Sync',
+        status: 'Warning',
+        details: `Timer auto-stopped at ${manilaTimeLabel(shiftEnd)}, the end of your shift — it was still running ${hoursPast}h later. Edit that day on your DTR if you worked past it.`,
+      });
+    }
+    return null;
+  } catch (e) {
+    // Couldn't stop it: leave it running rather than hide a session that still exists.
+    console.error('Auto-stop failed:', e);
+    return timer;
+  }
+}
+
 // Punches are entered as the wall-clock time the user read off their company's RFID reader, so
 // an HH:mm has to be anchored to a real calendar date in Manila. "Today" is the wrong assumption
 // on a shift that crosses midnight, so both directions roll a day when the naive answer is
@@ -241,9 +273,59 @@ export async function getActiveTimer(userId: string, isEmployee: boolean = false
 const MANILA_TZ = 'Asia/Manila';
 // Clock skew between the user's device and the server shouldn't read as "in the future".
 const FUTURE_TOLERANCE_MS = 60 * 1000;
-// Nobody works a single session longer than this. Past it, the timer was forgotten rather than
-// running, so the punch is closed at one shift's length instead of banking the whole gap.
+// How far back a Time In can be backdated; older days belong in Manual Adjustment.
 const FORGOTTEN_TIMER_SECONDS = 24 * 3600;
+// How far past the shift's end a session can still run as overtime. Beyond it the timer was
+// forgotten rather than worked, and it closes at the shift's end instead.
+const OVERTIME_ALLOWANCE_SECONDS = 4 * 3600;
+
+function manilaTimeLabel(d: Date) {
+  return d.toLocaleString('en-US', { timeZone: MANILA_TZ, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+// The shift end a session begun at `start` should have stopped at, if closing it at `at` would run
+// past that end by more than the overtime allowance; otherwise null.
+async function forgottenAt(userId: string, start: Date, at: Date): Promise<Date | null> {
+  // The cutoff is never sooner than the allowance after the start, so short sessions skip the lookup.
+  if (at.getTime() - start.getTime() <= OVERTIME_ALLOWANCE_SECONDS * 1000) return null;
+  const { getShiftConfig, scheduledShiftEnd } = await import('./shift');
+  const shiftEnd = scheduledShiftEnd(await getShiftConfig(userId), start, OVERTIME_ALLOWANCE_SECONDS);
+  return at.getTime() > shiftEnd.getTime() + OVERTIME_ALLOWANCE_SECONDS * 1000 ? shiftEnd : null;
+}
+
+// Turns the running timer into an entries row and returns its duration, or null if another request
+// already closed it. The timer row is claimed first (delete … returning), so an auto-stop racing a
+// Time Out logs the session once.
+async function closeTimer(userId: string, isEmployee: boolean, timer: ActiveTimer, end: Date, description: string) {
+  const { data: claimed, error } = await supabase
+    .from('active_timers')
+    .delete()
+    .eq('user_id', userId)
+    .eq('is_employee', isEmployee)
+    .eq('start_time', timer.startTime)
+    .select();
+  if (error) throw error;
+  if (!claimed?.length) return null;
+
+  const start = new Date(timer.startTime);
+  const durationSeconds = Math.max(0, Math.floor((end.getTime() - start.getTime()) / 1000));
+  const { error: logError } = await supabase
+    .from('entries')
+    .insert({
+      user_id: userId,
+      description,
+      start_time: start.toISOString(),
+      end_time: end.toISOString(),
+      duration_seconds: durationSeconds,
+      is_employee: isEmployee
+    });
+  if (logError) {
+    // Put the timer back rather than lose the session.
+    await supabase.from('active_timers').upsert(claimed[0]);
+    throw logError;
+  }
+  return durationSeconds;
+}
 
 function manilaDateStr(d: Date) {
   return d.toLocaleDateString('en-CA', { timeZone: MANILA_TZ });
@@ -333,41 +415,18 @@ export async function stopTimer(
 
   const now = new Date();
   const start = new Date(timer.startTime);
-  // An explicit punch-out anchors to the day the timer started, so a session left running for
-  // days still closes at the hour the user actually tapped out rather than being capped blindly.
+  // A punch-out time anchors to the day the timer started (see resolvePunchOut).
   let end = punchOutTime ? resolvePunchOut(punchOutTime, start, now) : now;
-  let durationSeconds = Math.max(0, Math.floor((end.getTime() - start.getTime()) / 1000));
-  let capped = false;
+  // Too far past the shift's end, the timer was forgotten: it closes at the shift's end — the same
+  // place an unattended one is auto-stopped. The header always sends a time (pre-filled with now),
+  // so this has to judge typed times too.
+  const cutoff = await forgottenAt(userId, start, end);
+  if (cutoff) end = cutoff;
 
-  if (durationSeconds > FORGOTTEN_TIMER_SECONDS) {
-    const { getShiftConfig, shiftLengthSeconds } = await import('./shift');
-    durationSeconds = shiftLengthSeconds(await getShiftConfig(userId));
-    end = new Date(start.getTime() + durationSeconds * 1000);
-    capped = true;
-  }
+  const durationSeconds = await closeTimer(userId, isEmployee, timer, end, finalDescription);
+  if (durationSeconds === null) throw new Error('That timer was already stopped.');
 
-  const { error: logError } = await supabase
-    .from('entries')
-    .insert({
-      user_id: userId,
-      description: finalDescription,
-      start_time: start.toISOString(),
-      end_time: end.toISOString(),
-      duration_seconds: durationSeconds,
-      is_employee: isEmployee
-    });
-
-  if (logError) throw logError;
-
-  const { error } = await supabase
-    .from('active_timers')
-    .delete()
-    .eq('user_id', userId)
-    .eq('is_employee', isEmployee);
-
-  if (error) throw error;
-
-  return { capped, durationSeconds, startTime: start.toISOString(), endTime: end.toISOString() };
+  return { capped: !!cutoff, durationSeconds, startTime: start.toISOString(), endTime: end.toISOString() };
 }
 
 export async function updateTimerStart(userId: string, startTimeStr: string, isEmployee: boolean = false) {

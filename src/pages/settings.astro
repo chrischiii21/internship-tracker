@@ -981,6 +981,9 @@ const compactPeso = (n: number) => `₱${new Intl.NumberFormat('en-US', { notati
 
   // Handle visual loading state on form submissions
   document.addEventListener('submit', (e) => {
+    // A submit the page handled itself (preventDefault, or a cancelled confirm) never navigates,
+    // so an overlay here would never go away.
+    if (e.defaultPrevented) return;
     const form = e.target;
     if (form.dataset.submitting === 'true') return;
     

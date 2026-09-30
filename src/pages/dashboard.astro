@@ -280,7 +280,7 @@ const isEarningsMode = !!(settings.hasAllowance || settings.isEmployee);
                 <DashboardProfileCard settings={settings} />
               </div>
               <div class="sk-stats">
-                {['Today', 'Streak', 'Total Logs', settings.isEmployee ? 'Salary Allocation' : isEarningsMode ? 'Expected Earnings' : 'Best Day'].map((label) => (
+                {['Today', 'Streak', 'Total Logs', isEarningsMode && !settings.isEmployee ? 'Expected Earnings' : 'Best Day'].map((label) => (
                   <div class="sk-card sk-tile">
                     <span class="sk-label">{label}</span>
                     <span class="sk-bar sk-value sk-short"></span>
@@ -288,6 +288,12 @@ const isEarningsMode = !!(settings.hasAllowance || settings.isEmployee);
                   </div>
                 ))}
               </div>
+              {settings.isEmployee && (
+                <div class="sk-card sk-tile">
+                  <span class="sk-label">Salary Allocation</span>
+                  <span class="sk-bar sk-thin"></span>
+                </div>
+              )}
               <div class="sk-card sk-panel">
                 <h2 class="sk-title">Weekly <span class="accent">Activity</span></h2>
                 {[0, 1, 2, 3, 4].map(() => <span class="sk-bar sk-row"></span>)}
@@ -445,6 +451,9 @@ const isEarningsMode = !!(settings.hasAllowance || settings.isEmployee);
 
   // Handle visual loading state on form submissions
   document.addEventListener('submit', (e) => {
+    // A submit the page handled itself (preventDefault, or a cancelled confirm) never navigates,
+    // so an overlay here would never go away.
+    if (e.defaultPrevented) return;
     const form = e.target;
     if (form.dataset.submitting === 'true') return;
 
