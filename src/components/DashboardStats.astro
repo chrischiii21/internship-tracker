@@ -1273,10 +1273,10 @@ if (!settings.isEmployee) {
       renderRows();
       rowsEl.lastElementChild?.querySelector('.alloc-name').select();
     });
-    presetSelect.addEventListener('change', () => {
+    presetSelect.addEventListener('change', async () => {
       const chosen = presetSelect.value;
       presetSelect.value = '';
-      if (!chosen || !confirm('Replace these buckets with this preset?')) return;
+      if (!chosen || !await window.showConfirm('Replace these buckets with this preset?', 'Replace')) return;
       state.plans[activeKey()] = fromPreset(chosen);
       renderRows();
     });
@@ -1290,9 +1290,9 @@ if (!settings.isEmployee) {
       paintPeriod();
       renderRows();
     }));
-    copyBtn.addEventListener('click', () => {
+    copyBtn.addEventListener('click', async () => {
       const other = payday === '15' ? '30' : '15';
-      if (!confirm(`Replace the ${payday}th plan with a copy of the ${other}th?`)) return;
+      if (!await window.showConfirm(`Replace the ${payday}th plan with a copy of the ${other}th?`, 'Replace')) return;
       ensurePlan(other);
       copyPlan(other, payday);
       renderRows();

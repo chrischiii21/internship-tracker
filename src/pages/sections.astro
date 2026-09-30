@@ -165,7 +165,7 @@ const sectionInviteCode = matchedSec ? matchedSec.invite_code : '';
                         <button class="copy-invite-btn" title="Copy invite message" data-code={sec.invite_code} data-section={sec.section_name}>
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                         </button>
-                        <form method="POST" style="margin: 0; display: inline;" onsubmit="event.stopPropagation(); return confirm('Are you sure you want to delete this section? Linked students will be marked as unassigned.');">
+                        <form method="POST" style="margin: 0; display: inline;" onsubmit="event.stopPropagation(); event.preventDefault(); showConfirm('Delete this section? Linked students will be marked as unassigned.', 'Delete').then(ok => ok && this.submit());">
                           <input type="hidden" name="action" value="delete-section" />
                           <input type="hidden" name="sectionId" value={sec.id} />
                           <button type="submit" class="copy-btn" title="Delete section" style="color: #ef4444; background: none; border: none; padding: 4px; cursor: pointer;">

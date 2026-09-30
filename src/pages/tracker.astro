@@ -444,7 +444,7 @@ const clockifyPossible = settings.clockifyEnabled !== false && !!import.meta.env
               <div style="display: flex; flex-direction: column; gap: 18px;">
                 <div>
                   <label style="display: block; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); margin-bottom: 6px;">Activity Description</label>
-                  <div id="details-desc" style="font-size: 15px; font-weight: 600; color: #fff; line-height: 1.5; word-break: break-word;"></div>
+                  <div id="details-desc" style="font-size: 15px; font-weight: 600; color: var(--text-primary); line-height: 1.5; word-break: break-word;"></div>
                 </div>
                 
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
@@ -491,13 +491,13 @@ const clockifyPossible = settings.clockifyEnabled !== false && !!import.meta.env
               <div style="flex: 1; overflow: hidden; border-radius: 12px; background: rgba(0,0,0,0.4); border: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: center; min-height: 250px; position: relative;">
                 <img id="details-gallery-img" src="" alt="Documentation proof" style="max-width: 100%; max-height: 55vh; object-fit: contain; border-radius: 8px; display: block;" />
                 <div id="details-gallery-no-preview" style="display: none; text-align: center; padding: 40px;">
-                  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="1.5" style="margin-bottom: 12px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="rgba(var(--fg-rgb), 0.2)" stroke-width="1.5" style="margin-bottom: 12px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
                   <p style="color: var(--text-secondary); font-size: 13px; margin: 0 0 12px 0;">This file cannot be previewed</p>
                   <a id="details-gallery-open-link" href="#" target="_blank" rel="noopener" style="color: var(--ntv-orange); font-size: 13px; font-weight: 600;">Open in new tab →</a>
                 </div>
                 
                 <div id="details-gallery-empty" style="display: none; text-align: center; padding: 40px;">
-                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="1.5" style="margin-bottom: 12px;"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M20.4 20.4L15 13l-4 5-3-3-4.4 5.4"/></svg>
+                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="rgba(var(--fg-rgb), 0.15)" stroke-width="1.5" style="margin-bottom: 12px;"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M20.4 20.4L15 13l-4 5-3-3-4.4 5.4"/></svg>
                   <p style="color: var(--text-secondary); font-size: 13px; margin: 0;">No documentation proof uploaded for this entry.</p>
                 </div>
               </div>
@@ -507,9 +507,9 @@ const clockifyPossible = settings.clockifyEnabled !== false && !!import.meta.env
 
               <!-- Navigation -->
               <div id="details-gallery-nav" style="display: none; justify-content: center; align-items: center; gap: 16px; margin-top: 14px; flex-shrink: 0;">
-                <button id="details-prev-btn" type="button" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 8px 18px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; transition: all 0.2s;">← Prev</button>
+                <button id="details-prev-btn" type="button" style="background: rgba(var(--fg-rgb), 0.06); border: 1px solid rgba(var(--fg-rgb), 0.1); color: var(--text-primary); padding: 8px 18px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; transition: all 0.2s;">← Prev</button>
                 <span id="details-nav-label" style="font-size: 12px; color: var(--text-secondary);"></span>
-                <button id="details-next-btn" type="button" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 8px 18px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; transition: all 0.2s;">Next →</button>
+                <button id="details-next-btn" type="button" style="background: rgba(var(--fg-rgb), 0.06); border: 1px solid rgba(var(--fg-rgb), 0.1); color: var(--text-primary); padding: 8px 18px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; transition: all 0.2s;">Next →</button>
               </div>
 
               <!-- Open in new tab link -->
@@ -1269,7 +1269,7 @@ const clockifyPossible = settings.clockifyEnabled !== false && !!import.meta.env
       // Highlight active thumb
       if (detailsThumbsEl) {
         detailsThumbsEl.querySelectorAll('.gallery-thumb').forEach((t, i) => {
-          t.style.borderColor = i === idx ? 'var(--ntv-orange)' : 'rgba(255,255,255,0.1)';
+          t.style.borderColor = i === idx ? 'var(--ntv-orange)' : 'rgba(var(--fg-rgb), 0.1)';
           t.style.opacity = i === idx ? '1' : '0.5';
         });
       }
@@ -1360,14 +1360,14 @@ const clockifyPossible = settings.clockifyEnabled !== false && !!import.meta.env
           const thumb = document.createElement('button');
           thumb.type = 'button';
           thumb.className = 'gallery-thumb';
-          thumb.style.cssText = 'flex-shrink:0;width:64px;height:64px;border-radius:8px;border:2px solid rgba(255,255,255,0.1);background:rgba(0,0,0,0.3);overflow:hidden;cursor:pointer;padding:0;transition:all 0.2s;';
+          thumb.style.cssText = 'flex-shrink:0;width:64px;height:64px;border-radius:8px;border:2px solid rgba(var(--fg-rgb), 0.1);background:rgba(0,0,0,0.3);overflow:hidden;cursor:pointer;padding:0;transition:all 0.2s;';
           if (isImage(url)) {
             const tImg = document.createElement('img');
             tImg.src = url;
             tImg.style.cssText = 'width:100%;height:100%;object-fit:cover;';
             thumb.appendChild(tImg);
           } else {
-            thumb.innerHTML = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="1.5" style="margin:auto;display:block;margin-top:20px"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+            thumb.innerHTML = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="rgba(var(--fg-rgb), 0.4)" stroke-width="1.5" style="margin:auto;display:block;margin-top:20px"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
           }
           thumb.addEventListener('click', () => loadDetailsDocAtIndex(i));
           if (detailsThumbsEl) detailsThumbsEl.appendChild(thumb);
@@ -1532,7 +1532,7 @@ const clockifyPossible = settings.clockifyEnabled !== false && !!import.meta.env
     overflow-y: auto;
     padding-right: 8px;
     scrollbar-width: thin;
-    scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+    scrollbar-color: rgba(var(--fg-rgb), 0.15) transparent;
   }
   
   /* Custom scrollbar for .log-list */
@@ -1543,21 +1543,21 @@ const clockifyPossible = settings.clockifyEnabled !== false && !!import.meta.env
     background: transparent;
   }
   .log-list::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.1);
+    background: rgba(var(--fg-rgb), 0.1);
     border-radius: 4px;
   }
   .log-list::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.2);
+    background: rgba(var(--fg-rgb), 0.2);
   }
   .log-card { 
-    background: rgba(5, 11, 22, 0.6); border: 1px solid var(--border-subtle); 
+    background: rgba(var(--surface-rgb), 0.6); border: 1px solid var(--border-subtle); 
     border-bottom: none; padding: 16px 20px; display: flex; justify-content: space-between; align-items: center;
     transition: background .15s;
   }
 
   /* AI Summary Modal Styling */
   .glassmorphic-ai {
-    background: rgba(10, 18, 32, 0.85) !important;
+    background: rgba(var(--surface-rgb), 0.85) !important;
     backdrop-filter: blur(20px);
     border: 1px solid rgba(237, 102, 33, 0.15) !important;
     box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6), 0 0 40px rgba(237, 102, 33, 0.05) !important;
@@ -1571,7 +1571,7 @@ const clockifyPossible = settings.clockifyEnabled !== false && !!import.meta.env
     margin: 0;
     font-size: 18px;
     font-weight: 700;
-    color: white;
+    color: var(--text-primary);
   }
   .ai-sparkle-glowing {
     color: var(--ntv-orange);
@@ -1644,10 +1644,10 @@ const clockifyPossible = settings.clockifyEnabled !== false && !!import.meta.env
   .ai-textarea {
     width: 100%;
     height: 160px;
-    background: rgba(5, 11, 22, 0.5);
+    background: rgba(var(--surface-rgb), 0.5);
     border: 1px solid var(--border-subtle);
     border-radius: 8px;
-    color: #e2e8f0;
+    color: var(--text-primary);
     padding: 14px;
     font-size: 14px;
     line-height: 1.6;
@@ -1696,7 +1696,7 @@ const clockifyPossible = settings.clockifyEnabled !== false && !!import.meta.env
     display: flex;
     align-items: center;
     gap: 8px;
-    background: rgba(13, 20, 33, 0.4);
+    background: rgba(var(--surface-rgb), 0.4);
     border: 1px solid var(--border-subtle);
     border-radius: 8px;
     padding: 6px 10px;
@@ -1717,7 +1717,7 @@ const clockifyPossible = settings.clockifyEnabled !== false && !!import.meta.env
   .filter-date-input {
     background: transparent;
     border: none;
-    color: white;
+    color: var(--text-primary);
     font-size: 12px;
     outline: none;
     font-family: 'Outfit', sans-serif;
@@ -1895,11 +1895,11 @@ const clockifyPossible = settings.clockifyEnabled !== false && !!import.meta.env
   .edit-form .form-group { display: flex; flex-direction: column; gap: 6px; }
   .edit-form .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
   .edit-form label { font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; }
-  .edit-form > input, .edit-form .form-group > input { display: block; width: 100%; box-sizing: border-box; background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 10px 14px; color: #fff; font-size: 14px; outline: none; }
+  .edit-form > input, .edit-form .form-group > input { display: block; width: 100%; box-sizing: border-box; background: rgba(var(--fg-rgb), 0.03); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 10px 14px; color: #fff; font-size: 14px; outline: none; }
   .edit-form > input:focus, .edit-form .form-group > input:focus { border-color: var(--ntv-orange); }
   
   .modal-actions { display: grid; grid-template-columns: 1fr 1.5fr; gap: 12px; margin-top: 12px; }
-  .btn-cancel { background: rgba(255,255,255,0.05); border: 1px solid var(--border-subtle); color: #fff; padding: 12px; border-radius: 10px; cursor: pointer; font-weight: 600; }
+  .btn-cancel { background: rgba(var(--fg-rgb), 0.05); border: 1px solid var(--border-subtle); color: var(--text-primary); padding: 12px; border-radius: 10px; cursor: pointer; font-weight: 600; }
   .btn-save { display: inline-flex; align-items: center; justify-content: center; background: var(--ntv-gradient); border: none; color: #fff; padding: 12px; border-radius: 10px; cursor: pointer; font-weight: 700; }
   .btn-save:hover { filter: brightness(1.1); transform: translateY(-1px); }
 
@@ -1915,15 +1915,15 @@ const clockifyPossible = settings.clockifyEnabled !== false && !!import.meta.env
   .side-form { display: flex; flex-direction: column; gap: 14px; }
   .input-group label { display: block; font-size: 10px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; margin-bottom: 6px; }
   .input-group > input { 
-    display: block; width: 100%; box-sizing: border-box; background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle);
+    display: block; width: 100%; box-sizing: border-box; background: rgba(var(--fg-rgb), 0.03); border: 1px solid var(--border-subtle);
     border-radius: 8px; padding: 10px 12px; color: white; font-size: 13px;
   }
   .input-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .time-12hr-wrapper { display: flex; align-items: center; background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle); border-radius: 8px; padding-right: 4px; transition: border-color 0.2s, background-color 0.2s; width: 100%; }
+  .time-12hr-wrapper { display: flex; align-items: center; background: rgba(var(--fg-rgb), 0.03); border: 1px solid var(--border-subtle); border-radius: 8px; padding-right: 4px; transition: border-color 0.2s, background-color 0.2s; width: 100%; }
   .time-12hr-wrapper input { border: none !important; background: transparent !important; flex: 1; padding: 10px 12px; width: 100%; color: white; font-size: 13px; outline: none; }
   .time-12hr-wrapper:focus-within { border-color: var(--ntv-orange); background: rgba(237, 102, 33, 0.04); }
-  .ampm-toggle-btn { background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-subtle); color: var(--text-secondary); font-size: 10px; font-weight: 800; padding: 6px 12px; border-radius: 6px; cursor: pointer; transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1); outline: none; user-select: none; }
-  .ampm-toggle-btn:hover { background: rgba(255, 255, 255, 0.08); color: white; }
+  .ampm-toggle-btn { background: rgba(var(--fg-rgb), 0.05); border: 1px solid var(--border-subtle); color: var(--text-secondary); font-size: 10px; font-weight: 800; padding: 6px 12px; border-radius: 6px; cursor: pointer; transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1); outline: none; user-select: none; }
+  .ampm-toggle-btn:hover { background: rgba(var(--fg-rgb), 0.08); color: var(--text-primary); }
   .ampm-toggle-btn.active { background: var(--ntv-gradient); border-color: transparent; color: white; box-shadow: 0 2px 10px rgba(237, 102, 33, 0.2); }
   
   .btn-outline { 
@@ -1980,7 +1980,7 @@ const clockifyPossible = settings.clockifyEnabled !== false && !!import.meta.env
 
   /* Sync Status Card */
   .sync-status-card {
-    display: flex; gap: 32px; background: rgba(13, 20, 33, 0.4);
+    display: flex; gap: 32px; background: rgba(var(--surface-rgb), 0.4);
     border: 1px solid rgba(237, 102, 33, 0.15); border-radius: 20px;
     padding: 40px; backdrop-filter: blur(20px); margin-bottom: 40px;
     position: relative; overflow: hidden; animation: slideUp .6s cubic-bezier(.16,1,.3,1) both;
@@ -2030,7 +2030,7 @@ const clockifyPossible = settings.clockifyEnabled !== false && !!import.meta.env
     line-height: 1.5;
   }
   .notice-text strong {
-    color: #fff;
+    color: var(--text-primary);
     margin-right: 4px;
   }
   .notice-link {
@@ -2040,7 +2040,7 @@ const clockifyPossible = settings.clockifyEnabled !== false && !!import.meta.env
     margin-left: 4px;
   }
   .notice-link:hover {
-    color: #fff;
+    color: var(--text-primary);
   }
 
   /* File Upload Zone */
@@ -2050,7 +2050,7 @@ const clockifyPossible = settings.clockifyEnabled !== false && !!import.meta.env
     padding: 20px;
     text-align: center;
     cursor: pointer;
-    background: rgba(255, 255, 255, 0.01);
+    background: rgba(var(--fg-rgb), 0.01);
     transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
     display: flex;
     flex-direction: column;
@@ -2226,7 +2226,7 @@ const clockifyPossible = settings.clockifyEnabled !== false && !!import.meta.env
   }
   .source-filter-tabs {
     display: flex;
-    background: rgba(255, 255, 255, 0.03);
+    background: rgba(var(--fg-rgb), 0.03);
     border: 1px solid var(--border-subtle);
     padding: 3px;
     border-radius: 8px;
@@ -2245,15 +2245,15 @@ const clockifyPossible = settings.clockifyEnabled !== false && !!import.meta.env
     font-family: inherit;
   }
   .filter-tab:hover {
-    color: white;
+    color: var(--text-primary);
   }
   .filter-tab.active {
-    background: rgba(255, 255, 255, 0.07);
-    color: white;
+    background: rgba(var(--fg-rgb), 0.07);
+    color: var(--text-primary);
   }
   @keyframes running-pulse { 50% { opacity: 0.3; } }
   .sync-lock-icon {
-    color: rgba(255, 255, 255, 0.35);
+    color: rgba(var(--fg-rgb), 0.35);
   }
 
   /* Placeholder shown until the TrackerData island lands: the log list's frame, shimmering cards. */

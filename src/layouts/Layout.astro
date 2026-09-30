@@ -134,6 +134,9 @@ const ogImageURL = new URL("/logo.png", Astro.site);
     --border-subtle: rgba(255, 255, 255, 0.08);
     --card-bg: rgba(13, 20, 33, 0.7);
     --modal-bg: #0d1421;
+    /* Raw RGB for tints: rgba(var(--fg-rgb), .06) = subtle overlay, rgba(var(--surface-rgb), .6) = card surface. */
+    --fg-rgb: 255, 255, 255;
+    --surface-rgb: 5, 11, 22;
 
     --att-present: #22c55e;
     --att-absent: #e11d48;
@@ -152,6 +155,8 @@ const ogImageURL = new URL("/logo.png", Astro.site);
     --border-subtle: rgba(18, 24, 38, 0.08);
     --card-bg: #ffffff;
     --modal-bg: #ffffff;
+    --fg-rgb: 18, 24, 38;
+    --surface-rgb: 255, 255, 255;
 
     --att-present: #16a34a;
     --att-absent: #be123c;

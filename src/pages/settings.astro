@@ -458,7 +458,7 @@ const compactPeso = (n: number) => `₱${new Intl.NumberFormat('en-US', { notati
                               </span>
                             )}
                             {r.id ? (
-                              <form method="POST" action="/api/salary-history" class="salary-delete-form" onsubmit="return confirm('Remove this salary entry from your history?')">
+                              <form method="POST" action="/api/salary-history" class="salary-delete-form" onsubmit="event.preventDefault(); showConfirm('Remove this salary entry from your history?', 'Remove').then(ok => ok && this.submit())">
                                 <input type="hidden" name="id" value={r.id} />
                                 <button type="submit" class="salary-delete" aria-label={`Remove the ${longDate(r.effectiveDate)} entry`}>
                                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>

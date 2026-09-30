@@ -529,7 +529,7 @@ const formatBreakDuration = (minutes: number): string => {
     overflow-y: auto;
     padding-right: 8px;
     scrollbar-width: thin;
-    scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+    scrollbar-color: rgba(var(--fg-rgb), 0.15) transparent;
   }
   .log-list::-webkit-scrollbar {
     width: 6px;
@@ -538,14 +538,14 @@ const formatBreakDuration = (minutes: number): string => {
     background: transparent;
   }
   .log-list::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.1);
+    background: rgba(var(--fg-rgb), 0.1);
     border-radius: 4px;
   }
   .log-list::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.2);
+    background: rgba(var(--fg-rgb), 0.2);
   }
   .date-group-card {
-    background: rgba(5, 11, 22, 0.6);
+    background: rgba(var(--surface-rgb), 0.6);
     border: 1px solid var(--border-subtle);
     border-radius: 12px;
     margin-bottom: 16px;
@@ -562,14 +562,14 @@ const formatBreakDuration = (minutes: number): string => {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    background: rgba(255, 255, 255, 0.02);
+    background: rgba(var(--fg-rgb), 0.02);
     padding: 12px 20px;
     border-bottom: 1px solid var(--border-subtle);
   }
   .date-group-title {
     font-size: 13px;
     font-weight: 700;
-    color: white;
+    color: var(--text-primary);
   }
   .date-group-hours {
     font-size: 13px;
@@ -586,7 +586,7 @@ const formatBreakDuration = (minutes: number): string => {
     justify-content: space-between;
     align-items: center;
     padding: 14px 20px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    border-bottom: 1px solid rgba(var(--fg-rgb), 0.03);
     transition: background-color 0.15s;
   }
   .shift-item:last-child {
@@ -604,7 +604,7 @@ const formatBreakDuration = (minutes: number): string => {
   .break-divider-line {
     flex: 1;
     height: 1px;
-    background: repeating-linear-gradient(90deg, rgba(255,255,255,0.12) 0, rgba(255,255,255,0.12) 4px, transparent 4px, transparent 8px);
+    background: repeating-linear-gradient(90deg, rgba(var(--fg-rgb), 0.12) 0, rgba(var(--fg-rgb), 0.12) 4px, transparent 4px, transparent 8px);
   }
   .break-divider-label {
     font-size: 10px;
@@ -618,7 +618,7 @@ const formatBreakDuration = (minutes: number): string => {
   .shift-title {
     font-size: 14px;
     font-weight: 600;
-    color: white;
+    color: var(--text-primary);
     display: block;
     margin-bottom: 4px;
   }
@@ -653,7 +653,7 @@ const formatBreakDuration = (minutes: number): string => {
     align-items: center;
     padding: 8px 12px;
     margin-bottom: 12px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    border-bottom: 1px solid rgba(var(--fg-rgb), 0.05);
   }
   .month-name {
     font-size: 13px;
@@ -674,8 +674,8 @@ const formatBreakDuration = (minutes: number): string => {
     gap: 16px;
   }
   .week-group {
-    background: rgba(255, 255, 255, 0.01);
-    border: 1px dashed rgba(255, 255, 255, 0.06);
+    background: rgba(var(--fg-rgb), 0.01);
+    border: 1px dashed rgba(var(--fg-rgb), 0.06);
     border-radius: 14px;
     padding: 16px;
   }
@@ -685,7 +685,7 @@ const formatBreakDuration = (minutes: number): string => {
     align-items: center;
     padding-bottom: 12px;
     margin-bottom: 14px;
-    border-bottom: 1px dashed rgba(255, 255, 255, 0.06);
+    border-bottom: 1px dashed rgba(var(--fg-rgb), 0.06);
   }
   .week-name {
     font-size: 12px;
@@ -756,8 +756,8 @@ const formatBreakDuration = (minutes: number): string => {
     height: 28px;
     border-radius: 50%;
     color: var(--text-secondary);
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    background: rgba(var(--fg-rgb), 0.03);
+    border: 1px solid rgba(var(--fg-rgb), 0.05);
   }
   .ai-btn-daily:hover {
     color: var(--ntv-orange);
@@ -785,7 +785,7 @@ const formatBreakDuration = (minutes: number): string => {
   }
 @media (max-width: 900px) {
     .shift-item { flex-direction: column; align-items: flex-start; gap: 16px; }
-    .shift-actions { width: 100%; justify-content: space-between; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 12px; }
+    .shift-actions { width: 100%; justify-content: space-between; border-top: 1px solid rgba(var(--fg-rgb), 0.05); padding-top: 12px; }
   }
   .attendance-marker-item.actionable {
     background: rgba(251, 191, 36, 0.05);
@@ -793,7 +793,7 @@ const formatBreakDuration = (minutes: number): string => {
     border-radius: 10px;
   }
   .attendance-marker-item.informational {
-    background: rgba(255, 255, 255, 0.02);
+    background: rgba(var(--fg-rgb), 0.02);
     border: 1px dashed var(--border-subtle);
     border-radius: 10px;
     opacity: 0.85;
@@ -806,8 +806,8 @@ const formatBreakDuration = (minutes: number): string => {
     padding: 2px 8px;
     border-radius: 5px;
     color: var(--text-secondary);
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(var(--fg-rgb), 0.06);
+    border: 1px solid rgba(var(--fg-rgb), 0.12);
   }
   .source-badge.attendance.status-absent { border-color: rgba(225, 29, 72, 0.4); color: var(--att-absent); }
   .source-badge.attendance.status-wfh { border-color: rgba(250, 204, 21, 0.4); color: var(--att-wfh); }
@@ -876,7 +876,7 @@ const formatBreakDuration = (minutes: number): string => {
     gap: 16px;
     margin-top: 24px;
     padding: 12px;
-    background: rgba(255, 255, 255, 0.02);
+    background: rgba(var(--fg-rgb), 0.02);
     border: 1px solid var(--border-subtle);
     border-radius: 12px;
   }
@@ -888,15 +888,15 @@ const formatBreakDuration = (minutes: number): string => {
     height: 32px;
     border-radius: 8px;
     border: 1px solid var(--border-subtle);
-    background: rgba(255, 255, 255, 0.04);
+    background: rgba(var(--fg-rgb), 0.04);
     color: var(--text-secondary);
     cursor: pointer;
     transition: all 0.2s;
   }
   .pagination-btn:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.08);
-    color: white;
-    border-color: rgba(255, 255, 255, 0.2);
+    background: rgba(var(--fg-rgb), 0.08);
+    color: var(--text-primary);
+    border-color: rgba(var(--fg-rgb), 0.2);
   }
   .pagination-btn:disabled {
     opacity: 0.35;
@@ -907,7 +907,7 @@ const formatBreakDuration = (minutes: number): string => {
     color: var(--text-secondary);
   }
   .pagination-info strong {
-    color: white;
+    color: var(--text-primary);
   }
   @keyframes running-pulse { 50% { opacity: 0.3; } }
 </style>
