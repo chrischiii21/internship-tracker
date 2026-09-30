@@ -5,8 +5,10 @@ import Sidebar from '../components/Sidebar.astro';
 import { getSession } from '../lib/auth';
 import { parse } from 'cookie';
 import { getAppSettings } from '../lib/settings';
-import { formatHours } from '../lib/utils';
+import { formatHours, manilaDate } from '../lib/utils';
 import { getShiftConfig, SHIFT_PRESETS } from '../lib/shift';
+import { getSalaryHistory, type SalaryChange } from '../lib/salary';
+import { monthlyRateOn } from '../lib/earnings';
 
 const cookieHeader = Astro.request.headers.get('cookie') || '';
 const cookies = parse(cookieHeader);
@@ -38,6 +40,51 @@ const shiftConfig = settings.role === 'student' ? await getShiftConfig(user.id) 
 const displayStartDate = settings.isEmployee ? (settings.employeeStartDate || settings.startDate) : settings.startDate;
 const displayHostCompany = settings.isEmployee ? (settings.employerCompany || settings.hostCompany) : settings.hostCompany;
 const displayPaySchedule = settings.isEmployee ? (settings.employeePaySchedule || 'monthly') : settings.paySchedule;
+
+// Salary history (employees). With nothing recorded yet, the current rate stands in as the start.
+const todayStr = manilaDate();
+const salaryHistory = settings.isEmployee ? await getSalaryHistory(user.id) : [];
+const salarySteps: SalaryChange[] = salaryHistory.length
+  ? salaryHistory
+  : (settings.isEmployee && settings.monthlyRate ? [{ id: '', monthlyRate: settings.monthlyRate, effectiveDate: displayStartDate }] : []);
+const salaryRows = salarySteps.map((step, i) => {
+  const prev = salarySteps[i - 1]?.monthlyRate;
+  return {
+    ...step,
+    change: prev ? step.monthlyRate - prev : null,
+    changePct: prev ? (step.monthlyRate - prev) / prev * 100 : null,
+    upcoming: step.effectiveDate > todayStr,
+  };
+});
+const rateNow = monthlyRateOn(salarySteps, todayStr, settings.monthlyRate || 0);
+const firstRate = salarySteps[0]?.monthlyRate || 0;
+const growthPct = firstRate ? (rateNow - firstRate) / firstRate * 100 : 0;
+const raiseCount = salaryRows.filter(r => (r.change ?? 0) > 0 && !r.upcoming).length;
+const lastChange = salaryRows.filter(r => r.change !== null && !r.upcoming).at(-1);
+
+const peso = (n: number) => `₱${n.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
+const signed = (n: number, suffix = '') => `${n >= 0 ? '+' : '−'}${Math.abs(n).toLocaleString('en-US', { maximumFractionDigits: 1 })}${suffix}`;
+const signedPeso = (n: number) => `${n >= 0 ? '+' : '−'}${peso(Math.abs(n))}`;
+const longDate = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+
+// Step chart in percent space: the line is SVG stretched to the box (non-scaling stroke), while
+// dots and labels are HTML so they stay round and readable at any width.
+const chartStart = Date.parse(salarySteps[0]?.effectiveDate || todayStr);
+const chartEnd = Math.max(Date.parse(todayStr), Date.parse(salarySteps.at(-1)?.effectiveDate || todayStr));
+const rates = salarySteps.map(s => s.monthlyRate);
+// Only drawn with 2+ steps, so rates is never empty here.
+const yMin = Math.floor(Math.min(...rates) * 0.85 / 1000) * 1000;
+const yMax = Math.ceil(Math.max(...rates) * 1.08 / 1000) * 1000;
+const xPct = (d: string) => chartEnd > chartStart ? (Date.parse(d) - chartStart) / (chartEnd - chartStart) * 100 : 0;
+const yPct = (v: number) => (1 - (v - yMin) / ((yMax - yMin) || 1)) * 100;
+const stepPoints = [
+  ...salarySteps.flatMap((s, i) => [
+    ...(i > 0 ? [`${xPct(s.effectiveDate)},${yPct(salarySteps[i - 1].monthlyRate)}`] : []),
+    `${xPct(s.effectiveDate)},${yPct(s.monthlyRate)}`,
+  ]),
+  `100,${yPct(rates.at(-1) || 0)}`,
+].join(' ');
+const compactPeso = (n: number) => `₱${new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(n)}`;
 ---
 <Layout>
   <Header user={user} />
@@ -196,6 +243,14 @@ const displayPaySchedule = settings.isEmployee ? (settings.employeePaySchedule |
                         </select>
                       </div>
                     </div>
+                    <!-- Appears once the saved rate is edited: the change is logged to Salary History. -->
+                    <div class="form-row" id="rate-effective-row" style="display: none;">
+                      <div class="form-group">
+                        <label for="rateEffectiveDate">New Rate Effective From</label>
+                        <input type="date" id="rateEffectiveDate" name="rateEffectiveDate" value={todayStr} style="width: 100%; max-width: 100%;" />
+                        <p class="form-hint">Logged to your salary history — back-date it if the raise started earlier. Past pay periods keep the rate they were paid at.</p>
+                      </div>
+                    </div>
                   </div>
 
                   <button type="submit" class="save-btn" style="margin-top: 24px;">Update Configuration</button>
@@ -308,8 +363,115 @@ const displayPaySchedule = settings.isEmployee ? (settings.employeePaySchedule |
 
                   empToggle?.addEventListener('change', handleToggleChange);
                   if (empToggle) handleToggleChange();
+
+                  // Only an edit to an existing rate is a raise; a first-time rate has nothing to compare to.
+                  const rateEffectiveRow = document.getElementById('rate-effective-row');
+                  inpMonthlyRate?.addEventListener('input', () => {
+                    const saved = Number(inpMonthlyRate.defaultValue);
+                    const changed = saved > 0 && Number(inpMonthlyRate.value) !== saved;
+                    if (rateEffectiveRow) rateEffectiveRow.style.display = changed ? '' : 'none';
+                  });
                 </script>
               </section>
+              {settings.isEmployee && (
+                <section class="settings-card" id="salary-history-card">
+                  <h2 class="card-title">Salary History</h2>
+
+                  {salarySteps.length === 0 ? (
+                    <p class="form-hint">Set your monthly salary rate above and every change after that is tracked here.</p>
+                  ) : (
+                    <>
+                      <div class="salary-stats">
+                        <div class="salary-stat">
+                          <span class="salary-stat-label">Current Rate</span>
+                          <span class="salary-stat-value">{peso(rateNow)}</span>
+                          <span class="salary-stat-sub">per month</span>
+                        </div>
+                        <div class="salary-stat">
+                          <span class="salary-stat-label">Growth Since Start</span>
+                          <span class={`salary-stat-value ${growthPct > 0 ? 'up' : growthPct < 0 ? 'down' : ''}`}>
+                            {growthPct > 0 ? '▲ ' : growthPct < 0 ? '▼ ' : ''}{signed(growthPct, '%')}
+                          </span>
+                          <span class="salary-stat-sub">{signedPeso(rateNow - firstRate)} from {peso(firstRate)}</span>
+                        </div>
+                        <div class="salary-stat">
+                          <span class="salary-stat-label">Last Change</span>
+                          {lastChange ? (
+                            <>
+                              <span class={`salary-stat-value ${lastChange.change! > 0 ? 'up' : 'down'}`}>
+                                {lastChange.change! > 0 ? '▲ ' : '▼ '}{signed(lastChange.changePct!, '%')}
+                              </span>
+                              <span class="salary-stat-sub">{longDate(lastChange.effectiveDate)} · {raiseCount} {raiseCount === 1 ? 'raise' : 'raises'} total</span>
+                            </>
+                          ) : (
+                            <>
+                              <span class="salary-stat-value">—</span>
+                              <span class="salary-stat-sub">No changes yet</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      {salarySteps.length > 1 ? (
+                        <div class="salary-chart" role="img" aria-label={`Monthly salary from ${peso(firstRate)} to ${peso(rates.at(-1)!)}; full list below.`}>
+                          <div class="salary-plot">
+                            {[yMin, (yMin + yMax) / 2, yMax].map(t => (
+                              <span class="salary-tick" style={`top: ${yPct(t)}%`}>{compactPeso(t)}</span>
+                            ))}
+                            <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                              {[yMin, (yMin + yMax) / 2, yMax].map(t => (
+                                <line class="salary-grid" x1="0" x2="100" y1={yPct(t)} y2={yPct(t)} vector-effect="non-scaling-stroke" />
+                              ))}
+                              <polyline class="salary-line" points={stepPoints} vector-effect="non-scaling-stroke" />
+                            </svg>
+                            {salaryRows.map(r => (
+                              <span
+                                class={`salary-dot ${r.upcoming ? 'upcoming' : ''}`}
+                                style={`left: ${xPct(r.effectiveDate)}%; top: ${yPct(r.monthlyRate)}%`}
+                                title={`${longDate(r.effectiveDate)}: ${peso(r.monthlyRate)}${r.changePct !== null ? ` (${signed(r.changePct, '%')})` : ''}`}
+                              ></span>
+                            ))}
+                            <span class="salary-end-label" style={`top: ${yPct(rates.at(-1)!)}%`}>{peso(rates.at(-1)!)}</span>
+                          </div>
+                          <div class="salary-axis">
+                            <span>{longDate(salarySteps[0].effectiveDate)}</span>
+                            <span>{chartEnd > Date.parse(todayStr) ? longDate(salarySteps.at(-1)!.effectiveDate) : 'Today'}</span>
+                          </div>
+                        </div>
+                      ) : (
+                        <p class="form-hint salary-empty">Your trend line starts with your first raise — change your monthly rate above when it happens.</p>
+                      )}
+
+                      <ul class="salary-list">
+                        {salaryRows.slice().reverse().map(r => (
+                          <li>
+                            <div class="salary-when">
+                              <span class="salary-date">{longDate(r.effectiveDate)}</span>
+                              {r.upcoming && <span class="salary-tag">Upcoming</span>}
+                            </div>
+                            <span class="salary-rate">{peso(r.monthlyRate)}</span>
+                            {r.change === null ? (
+                              <span class="salary-change">Starting rate</span>
+                            ) : (
+                              <span class={`salary-change ${r.change > 0 ? 'up' : r.change < 0 ? 'down' : ''}`}>
+                                {r.change > 0 ? '▲' : r.change < 0 ? '▼' : ''} {signedPeso(r.change)} · {signed(r.changePct!, '%')}
+                              </span>
+                            )}
+                            {r.id ? (
+                              <form method="POST" action="/api/salary-history" class="salary-delete-form" onsubmit="return confirm('Remove this salary entry from your history?')">
+                                <input type="hidden" name="id" value={r.id} />
+                                <button type="submit" class="salary-delete" aria-label={`Remove the ${longDate(r.effectiveDate)} entry`}>
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                                </button>
+                              </form>
+                            ) : <span></span>}
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                </section>
+              )}
 
               <section class="settings-card" id="shift-config-card">
                 <h2 class="card-title">Work Shift</h2>
@@ -1007,6 +1169,71 @@ const displayPaySchedule = settings.isEmployee ? (settings.employeePaySchedule |
   .apply-btn { background: rgba(237, 102, 33, 0.1); border: 1px solid rgba(237, 102, 33, 0.3); color: var(--ntv-orange); padding: 0 16px; border-radius: 8px; font-weight: 700; font-size: 12px; cursor: pointer; }
   .unlink-btn { display: inline-flex; align-items: center; gap: 8px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); color: #f87171; padding: 10px 16px; border-radius: 8px; font-size: 13px; font-weight: 700; cursor: pointer; transition: 0.2s; }
   .unlink-btn:hover { background: #ef4444; color: white; border-color: #ef4444; transform: translateY(-1px); }
+
+  /* Salary history. Raises and cuts also carry ▲/▼ and a sign, so color is never the only cue. */
+  #salary-history-card { --salary-up: #34d399; --salary-down: #f87171; }
+  :global(.light-mode) #salary-history-card { --salary-up: #047857; --salary-down: #dc2626; }
+  .salary-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  /* Same box as the dashboard's quick-stat tiles. */
+  .salary-stat {
+    display: flex; flex-direction: column; gap: 6px; padding: 16px 18px; border-radius: 16px;
+    background: rgba(127,127,127,.05); border: 1px solid var(--border-subtle);
+  }
+  .salary-stat-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-secondary); }
+  .salary-stat-value { font-size: 20px; font-weight: 800; color: var(--text-primary); }
+  .salary-stat-sub { font-size: 11px; color: var(--text-secondary); }
+  .salary-stat-value.up, .salary-change.up { color: var(--salary-up); }
+  .salary-stat-value.down, .salary-change.down { color: var(--salary-down); }
+
+  .salary-chart { margin-top: 12px; }
+  .salary-plot { position: relative; height: 160px; margin: 28px 16px 0 52px; }
+  .salary-plot svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+  .salary-grid { stroke: var(--border-subtle); stroke-width: 1; }
+  .salary-line { fill: none; stroke: var(--ntv-orange); stroke-width: 2; stroke-linejoin: round; }
+  .salary-tick {
+    position: absolute; left: -52px; width: 44px; transform: translateY(-50%);
+    text-align: right; font-size: 10px; color: var(--text-secondary);
+  }
+  .salary-dot {
+    position: absolute; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%;
+    background: var(--ntv-orange); box-shadow: 0 0 0 2px var(--modal-bg); transition: transform .15s;
+  }
+  /* Hover target bigger than the mark; the native tooltip reads the title. */
+  .salary-dot::after { content: ''; position: absolute; inset: -8px; }
+  .salary-dot:hover { transform: scale(1.3); }
+  .salary-dot.upcoming { background: var(--modal-bg); border: 2px solid var(--ntv-orange); }
+  .salary-end-label {
+    position: absolute; right: 0; transform: translateY(calc(-100% - 8px));
+    font-size: 12px; font-weight: 800; color: var(--text-primary); white-space: nowrap;
+  }
+  .salary-axis { display: flex; justify-content: space-between; margin: 8px 16px 0 52px; font-size: 10px; color: var(--text-secondary); }
+  .salary-empty { margin-top: 16px; }
+
+  .salary-list { list-style: none; margin: 20px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  .salary-list li {
+    display: grid; grid-template-columns: 1fr auto 160px 28px; align-items: center; gap: 12px;
+    padding: 12px 14px; border-radius: 10px; background: rgba(127,127,127,.04); border: 1px solid var(--border-subtle);
+  }
+  .salary-when { display: flex; align-items: center; gap: 8px; }
+  .salary-date { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+  .salary-tag {
+    font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em;
+    color: var(--ntv-orange); background: rgba(237,102,33,.14); padding: 2px 6px; border-radius: 5px;
+  }
+  .salary-rate { font-size: 14px; font-weight: 800; color: var(--text-primary); }
+  .salary-change { font-size: 12px; font-weight: 700; color: var(--text-secondary); text-align: right; }
+  .salary-delete-form { margin: 0; }
+  .salary-delete {
+    display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 8px;
+    background: none; border: none; color: var(--text-secondary); cursor: pointer; transition: all .2s;
+  }
+  .salary-delete:hover { background: rgba(248,113,113,.12); color: #f87171; }
+
+  @media (max-width: 600px) {
+    .salary-stats { grid-template-columns: 1fr; }
+    .salary-list li { grid-template-columns: 1fr auto 28px; row-gap: 4px; }
+    .salary-change { grid-row: 2; grid-column: 1 / 3; text-align: left; }
+  }
 
   @media (max-width: 900px) { 
     #portal-main { margin-left: 0; padding: 24px 16px; } 

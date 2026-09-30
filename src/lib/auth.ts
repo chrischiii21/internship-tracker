@@ -108,6 +108,7 @@ export async function deleteAccount(userId: string) {
   await supabase.from('attendance_holidays').delete().eq('user_id', userId);
   await supabase.from('shift_config').delete().eq('user_id', userId);
   await supabase.from('payout_adjustments').delete().eq('user_id', userId);
+  await supabase.from('salary_history').delete().eq('user_id', userId);
   await supabase.from('sync_logs').delete().eq('user_id', userId);
 
   // A coordinator's sections go too; their students' coordinator_id/section_id are cleared by the

@@ -3,10 +3,11 @@ export interface GroupedEntry {
   totalSeconds: number;
   daysWorked: number; // distinct dates with logged time — what a fixed daily rate is paid on
   firstDate: string; // ISO string of the first date in this group for sorting
+  lastDate: string; // latest date in the group — decides which salary rate the period is paid at
 }
 
 export function groupEntries(entries: { date: string, durationSeconds: number }[], paySchedule: string): GroupedEntry[] {
-  const groups: Record<string, { totalSeconds: number, dates: Set<string>, firstDate: string }> = {};
+  const groups: Record<string, { totalSeconds: number, dates: Set<string>, firstDate: string, lastDate: string }> = {};
 
   entries.forEach(entry => {
     // Dates arrive as plain 'YYYY-MM-DD' in Manila time. Reading them through the runtime's local
@@ -33,10 +34,11 @@ export function groupEntries(entries: { date: string, durationSeconds: number }[
     }
 
     if (!groups[label]) {
-      groups[label] = { totalSeconds: 0, dates: new Set(), firstDate: entry.date };
-    } else if (entry.date < groups[label].firstDate) {
-      // ISO dates sort lexicographically, so no Date parsing is needed to find the earliest.
-      groups[label].firstDate = entry.date;
+      groups[label] = { totalSeconds: 0, dates: new Set(), firstDate: entry.date, lastDate: entry.date };
+    } else {
+      // ISO dates sort lexicographically, so no Date parsing is needed to find the ends.
+      if (entry.date < groups[label].firstDate) groups[label].firstDate = entry.date;
+      if (entry.date > groups[label].lastDate) groups[label].lastDate = entry.date;
     }
 
     groups[label].totalSeconds += entry.durationSeconds;
@@ -50,6 +52,7 @@ export function groupEntries(entries: { date: string, durationSeconds: number }[
       totalSeconds: groups[label].totalSeconds,
       daysWorked: groups[label].dates.size,
       firstDate: groups[label].firstDate,
+      lastDate: groups[label].lastDate,
     }))
     .sort((a, b) => a.firstDate.localeCompare(b.firstDate));
 }

@@ -122,6 +122,18 @@ CREATE TABLE IF NOT EXISTS public.payout_adjustments (
     UNIQUE (user_id, period_label)
 );
 
+-- 9. SALARY HISTORY
+-- Purpose: Every monthly rate an employee has had, keyed by the date it took effect. Written when
+-- Settings saves a different rate; pay periods are priced at the rate in force at the time.
+CREATE TABLE IF NOT EXISTS public.salary_history (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id TEXT NOT NULL,
+    monthly_rate NUMERIC NOT NULL,
+    effective_date DATE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE (user_id, effective_date)
+);
+
 -- ==========================================
 -- ATTENDANCE FEATURE
 -- ==========================================
@@ -209,6 +221,7 @@ ALTER TABLE public.active_timers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.sync_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.payout_adjustments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.salary_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.attendance_overrides ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.attendance_config ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.attendance_holidays ENABLE ROW LEVEL SECURITY;

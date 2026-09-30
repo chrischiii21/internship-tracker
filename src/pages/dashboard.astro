@@ -280,7 +280,7 @@ const isEarningsMode = !!(settings.hasAllowance || settings.isEmployee);
                 <DashboardProfileCard settings={settings} />
               </div>
               <div class="sk-stats">
-                {['Today', 'Streak', 'Total Logs', isEarningsMode ? 'Expected Earnings' : 'Best Day'].map((label) => (
+                {['Today', 'Streak', 'Total Logs', settings.isEmployee ? 'Salary Allocation' : isEarningsMode ? 'Expected Earnings' : 'Best Day'].map((label) => (
                   <div class="sk-card sk-tile">
                     <span class="sk-label">{label}</span>
                     <span class="sk-bar sk-value sk-short"></span>
@@ -333,12 +333,12 @@ const isEarningsMode = !!(settings.hasAllowance || settings.isEmployee);
     {
       target: '[data-tour="earnings-tile"]',
       title: 'Earnings, without leaving the page',
-      body: 'This tile shows what your logged hours are worth. Open the full breakdown to see each pay period, mark a payout as received, or correct an amount — it all happens right here.',
+      body: 'Interns see what their logged hours are worth; employees split each payday into budget buckets. Either way, the breakdown lets you mark a payout as received or correct an amount — right here.',
     },
     {
       target: '.quick-stats',
       title: 'Quick stats',
-      body: 'The running total for today, streaks, total logs and expected earnings — each tile spells out how its number was worked out, so nothing here is a black box.',
+      body: 'The running total for today, streaks, total logs and pay — each tile spells out how its number was worked out, so nothing here is a black box.',
     },
     {
       target: '.weekly-chart-card',

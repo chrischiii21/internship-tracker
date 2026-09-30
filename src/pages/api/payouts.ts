@@ -4,6 +4,7 @@ import { getAppSettings } from '../../lib/settings';
 import { getTrackedEntries } from '../../lib/entries';
 import { groupEntries } from '../../lib/grouping';
 import { activePaySchedule, buildPeriodBreakdown } from '../../lib/earnings';
+import { getSalaryHistory } from '../../lib/salary';
 import { parse } from 'cookie';
 
 // Recomputed breakdown for the Dashboard's earnings modal. Marking one period as received shifts
@@ -24,12 +25,13 @@ export async function GET({ request }: { request: Request }) {
   const entries = await getTrackedEntries(user.id, user.email, settings, startDate);
   const groups = groupEntries(entries, isEarningsMode ? activePaySchedule(settings) : 'monthly');
   const adjustments = isEarningsMode ? await getPayoutAdjustments(user.id) : {};
+  const salaryHistory = settings.isEmployee ? await getSalaryHistory(user.id) : [];
 
   return new Response(JSON.stringify({
     isEarningsMode,
     payType: settings.payType,
     isEmployee: !!settings.isEmployee,
-    rows: buildPeriodBreakdown(settings, groups, adjustments),
+    rows: buildPeriodBreakdown(settings, groups, adjustments, salaryHistory),
   }), {
     status: 200,
     headers: { 'Content-Type': 'application/json' },

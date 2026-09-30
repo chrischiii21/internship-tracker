@@ -29,6 +29,25 @@ ALTER TABLE public.attendance_overrides ADD COLUMN IF NOT EXISTS reason TEXT;
 
 
 -- --------------------------------------------------------------------------
+-- 1c. salary_history  (REQUIRED for the salary history feature)
+-- --------------------------------------------------------------------------
+-- Records each monthly rate an employee has had, so Settings can show raises over time and the
+-- payouts breakdown prices each period at the rate in force back then. Until this runs, the app
+-- reads an empty history and keeps working exactly as before. The UNIQUE key doubles as the
+-- lookup index (user_id, effective_date).
+
+CREATE TABLE IF NOT EXISTS public.salary_history (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id TEXT NOT NULL,
+    monthly_rate NUMERIC NOT NULL,
+    effective_date DATE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE (user_id, effective_date)
+);
+ALTER TABLE public.salary_history ENABLE ROW LEVEL SECURITY;
+
+
+-- --------------------------------------------------------------------------
 -- 2. Indexes for the queries the app actually runs
 -- --------------------------------------------------------------------------
 -- Hours are always read as "this user, this mode, since this date"; the coordinator roster reads

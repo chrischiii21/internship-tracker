@@ -5,8 +5,10 @@ import { getTrackedEntries, getActiveTimer } from '../lib/entries';
 import { getStudentProgress } from '../lib/clockify';
 import { formatHMS, formatHours, manilaDate } from '../lib/utils';
 import { groupEntries } from '../lib/grouping';
-import { totalEarnings, totalDaysWorked, buildPeriodBreakdown } from '../lib/earnings';
+import { totalEarnings, totalDaysWorked, buildPeriodBreakdown, monthlyRateOn } from '../lib/earnings';
 import { getPayoutAdjustments } from '../lib/payouts';
+import { getSalaryHistory } from '../lib/salary';
+import { INSTITUTIONS } from '../lib/institutions';
 import type { AppSettings } from '../lib/settings';
 import DashboardProfileCard from './DashboardProfileCard.astro';
 
@@ -160,15 +162,29 @@ for (let i = 0; i < 3650; i++) {
 const isEarningsMode = !!(settings.hasAllowance || settings.isEmployee);
 const earningsGroups = groupEntries(allRawEntries, isEarningsMode ? activePaySchedule : 'monthly');
 const payoutAdjustments = isEarningsMode ? await getPayoutAdjustments(user.id) : {};
-const periodRows = buildPeriodBreakdown(settings, earningsGroups, payoutAdjustments).reverse();
+const salaryHistory = settings.isEmployee ? await getSalaryHistory(user.id) : [];
+const periodRows = buildPeriodBreakdown(settings, earningsGroups, payoutAdjustments, salaryHistory).reverse();
 
-const quickEarnings = isEarningsMode ? totalEarnings(settings, earningsGroups) : 0;
-const quickEarningsPeriods = earningsGroups.length;
+const quickEarnings = isEarningsMode ? totalEarnings(settings, earningsGroups, salaryHistory) : 0;
 const quickEarningsDays = totalDaysWorked(earningsGroups);
 const quickEarningsHours = earningsGroups.reduce((sum, group) => sum + group.totalSeconds, 0) / 3600;
-const quickEarningsRate = settings.isEmployee
-  ? (activePaySchedule === 'semi-monthly' ? (settings.monthlyRate || 0) / 2 : (settings.monthlyRate || 0))
-  : settings.hourlyRate;
+// Salary allocation (employees): a salary is the same every payday, so their tile splits one
+// kinsena (15th/30th) or month into budget buckets instead of showing a running total. It plans on
+// the rate in force today, so an upcoming raise doesn't count until it lands.
+const allocMonthly = settings.isEmployee ? monthlyRateOn(salaryHistory, todayManila, settings.monthlyRate || 0) : 0;
+const allocPer = activePaySchedule === 'semi-monthly' ? 'kinsena' : 'month';
+const allocGross = allocPer === 'kinsena' ? allocMonthly / 2 : allocMonthly;
+// Each kinsena has its own plan; the tile previews the next one: the 15th for days 31 and 1–15,
+// the 30th (month-end) for 16–30.
+const todayDay = Number(todayManila.slice(8, 10));
+const allocNextPayday = todayDay > 15 && todayDay <= 30 ? '30' : '15';
+// Starting splits for the allocation calculator, as [bucket, % of pay]. The first is the default.
+const ALLOC_PRESETS: { label: string; buckets: [string, number][] }[] = [
+  { label: '50/30/20 · Needs, Wants, Savings', buckets: [['Needs', 50], ['Wants', 30], ['Savings', 20]] },
+  { label: '70/20/10 · Living, Savings, Debt', buckets: [['Living expenses', 70], ['Savings', 20], ['Debt payments', 10]] },
+  { label: '80/20 · Save first, spend the rest', buckets: [['Savings', 20], ['Spending', 80]] },
+  { label: '6 Jars · Necessities to Giving', buckets: [['Necessities', 55], ['Financial freedom', 10], ['Long-term savings', 10], ['Education', 10], ['Play', 10], ['Give', 5]] },
+];
 
 // All-time activity stats: active day count, longest consecutive streak, average pace, this-month total
 const activeDates = Object.keys(dailyHoursMap).filter(d => dailyHoursMap[d] > 0).sort();
@@ -434,18 +450,30 @@ if (!settings.isEmployee) {
             </p>
           </div>
 
-          {isEarningsMode ? (
+          {settings.isEmployee ? (
+            <div class="stat-tile" data-tour="earnings-tile" id="alloc-tile" data-monthly={allocMonthly} data-per={allocPer} data-next-payday={allocNextPayday}>
+              <div class="stat-head">
+                <span class="stat-label">Salary Allocation</span>
+                <span class="stat-value" id="alloc-tile-amount">₱{allocGross.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span>
+              </div>
+              <div class="alloc-bar" id="alloc-tile-bar"></div>
+              <ul class="alloc-legend" id="alloc-tile-legend"></ul>
+              <p class="stat-explain">
+                <span id="alloc-tile-period">{allocPer === 'kinsena' ? `${allocNextPayday}th kinsena — your next payday.` : 'Per month.'}</span>
+                {' '}<button type="button" class="stat-explain-link" id="open-alloc">Plan allocation →</button>
+                {' '}<button type="button" class="stat-explain-link open-breakdown">Payouts →</button>
+              </p>
+            </div>
+          ) : isEarningsMode ? (
             <div class="stat-tile" data-tour="earnings-tile">
               <div class="stat-head">
                 <span class="stat-label">Expected Earnings</span>
                 <span class="stat-value">₱{quickEarnings.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span>
               </div>
               <p class="stat-explain">
-                {settings.isEmployee
-                  ? `${quickEarningsPeriods} pay period(s) × ₱${quickEarningsRate.toLocaleString()} on your ${activePaySchedule} schedule.`
-                  : settings.payType === 'daily'
-                    ? `${quickEarningsDays} day(s) worked × ₱${settings.hourlyRate}/day.`
-                    : `${formatHours(quickEarningsHours)} tracked × ₱${settings.hourlyRate}/hr.`}
+                {settings.payType === 'daily'
+                  ? `${quickEarningsDays} day(s) worked × ₱${settings.hourlyRate}/day.`
+                  : `${formatHours(quickEarningsHours)} tracked × ₱${settings.hourlyRate}/hr.`}
                 {' '}<button type="button" class="stat-explain-link open-breakdown">View full breakdown →</button>
               </p>
             </div>
@@ -638,6 +666,138 @@ if (!settings.isEmployee) {
     </div>
   </div>
 
+  {settings.isEmployee && (
+    <div id="alloc-modal" class="modal-overlay" style="display: none;">
+      <div class="modal-content breakdown-modal-content alloc-modal-content">
+        <div class="breakdown-header">
+          <div>
+            <h3>Salary Allocation</h3>
+            <p class="modal-subtitle">Split one payday into buckets, by percent or a fixed amount, and route each to an account. Saved on this device.</p>
+          </div>
+          <button type="button" id="alloc-close" class="breakdown-close" aria-label="Close">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+
+        <div class="alloc-per" role="group" aria-label="Plan period">
+          <button type="button" data-alloc-per="kinsena">Per kinsena (15th &amp; 30th)</button>
+          <button type="button" data-alloc-per="month">Per month</button>
+        </div>
+        <div id="alloc-paydays" class="alloc-paydays">
+          <div class="alloc-per" role="group" aria-label="Which kinsena">
+            <button type="button" data-alloc-payday="15">15th</button>
+            <button type="button" data-alloc-payday="30">30th</button>
+          </div>
+          <button type="button" id="alloc-copy" class="stat-explain-link"></button>
+        </div>
+
+        <label class="alloc-takehome">
+          <span id="alloc-takehome-label">Take-home</span>
+          <div class="alloc-takehome-input">
+            <span class="bd-currency">₱</span>
+            <input type="number" id="alloc-takehome" min="0" step="0.01" />
+          </div>
+          <small id="alloc-gross-hint"></small>
+        </label>
+
+        <div class="alloc-section">
+          <span class="alloc-section-label">Your accounts</span>
+          <div id="alloc-accounts" class="alloc-accounts"></div>
+          <form id="alloc-account-form" class="alloc-account-form">
+            <input type="text" id="alloc-account-name" maxlength="32" list="alloc-institutions" placeholder="e.g. BPI Savings, GCash, BDO Visa" aria-label="Account name" />
+            <datalist id="alloc-institutions">
+              {INSTITUTIONS.map(i => <option value={i.name} />)}
+            </datalist>
+            <select id="alloc-account-type" aria-label="Account type">
+              <option value="bank">Bank</option>
+              <option value="card">Credit card</option>
+              <option value="ewallet">E-wallet</option>
+              <option value="cash">Cash</option>
+            </select>
+            <button type="submit" class="bd-btn-edit">Add</button>
+          </form>
+        </div>
+
+        <div class="alloc-section">
+          <span class="alloc-section-label">Buckets</span>
+          <div id="alloc-rows" class="alloc-rows"></div>
+        </div>
+
+        <p id="alloc-status" class="alloc-status"></p>
+
+        <div class="alloc-actions">
+          <button type="button" id="alloc-add" class="bd-btn-edit">+ Add bucket</button>
+          <select id="alloc-preset" class="alloc-preset" aria-label="Replace buckets with a preset">
+            <option value="">Start from a preset…</option>
+            {ALLOC_PRESETS.map(p => <option value={JSON.stringify(p.buckets)}>{p.label}</option>)}
+          </select>
+        </div>
+
+        <div id="alloc-transfers" class="alloc-section" hidden>
+          <span class="alloc-section-label" id="alloc-transfers-label">Transfers</span>
+          <ul id="alloc-transfer-list" class="alloc-transfers"></ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Cloned by the script below; templates keep this component's scoped styles on the copies. -->
+    <template id="alloc-row-tpl">
+      <div class="alloc-row">
+        <div class="alloc-move">
+          <button type="button" class="alloc-up" aria-label="Move up">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="18 15 12 9 6 15"/></svg>
+          </button>
+          <button type="button" class="alloc-down" aria-label="Move down">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+        </div>
+        <input type="color" class="alloc-color" aria-label="Bucket color" />
+        <input type="text" class="alloc-name" maxlength="24" aria-label="Bucket name" />
+        <div class="alloc-value-wrap">
+          <input type="number" class="alloc-value" min="0" step="any" aria-label="Bucket size" />
+          <button type="button" class="alloc-unit" title="Switch between % of pay and a fixed ₱ amount"></button>
+        </div>
+        <div class="alloc-amount-wrap">
+          <span class="alloc-amount"></span>
+          <span class="alloc-share"></span>
+        </div>
+        <button type="button" class="alloc-remove" aria-label="Remove bucket">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+        <div class="alloc-account-wrap">
+          <span class="acct-logo" hidden></span>
+          <select class="alloc-account" aria-label="Account this bucket goes to"></select>
+        </div>
+      </div>
+    </template>
+    <template id="alloc-account-tpl">
+      <span class="alloc-chip">
+        <span class="acct-logo"></span>
+        <span class="alloc-chip-name"></span>
+        <span class="alloc-chip-type"></span>
+        <button type="button" class="alloc-chip-remove" aria-label="Remove account">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </span>
+    </template>
+    <template id="alloc-transfer-tpl">
+      <li>
+        <div class="alloc-transfer-account">
+          <span class="acct-logo"></span>
+          <div class="alloc-transfer-main">
+            <span class="alloc-transfer-name"></span>
+            <span class="alloc-transfer-buckets"></span>
+          </div>
+        </div>
+        <span class="alloc-transfer-amount"></span>
+      </li>
+    </template>
+    <template id="alloc-legend-tpl">
+      <li><span class="alloc-dot"></span><span class="alloc-legend-name"></span><span class="acct-logo" hidden></span><span class="alloc-legend-amount"></span></li>
+    </template>
+    <script type="application/json" id="alloc-institutions-data" is:inline set:html={JSON.stringify(INSTITUTIONS)} />
+  )}
+
 <script is:inline>
   {
   // The breakdown modal is position: fixed, so it can't live inside #dash-content (its entrance
@@ -807,6 +967,363 @@ if (!settings.isEmployee) {
         if (Number.isFinite(value)) save(label, value);
       }
     });
+  })();
+
+  // Salary allocation calculator (employees). A personal budget, not pay data, so it lives in
+  // localStorage rather than the database.
+  // ponytail: per-device only; move to student_settings if it needs to follow you across devices.
+  (() => {
+    const tile = document.getElementById('alloc-tile');
+    const modal = document.getElementById('alloc-modal');
+    if (!tile || !modal) return;
+    document.body.appendChild(modal);
+
+    const STORE = 'salary_allocation';
+    // Validated as a set (CVD + lightness band) against both themes' surfaces.
+    const COLORS = ['#ed6621', '#3b82f6', '#059669', '#8b5cf6', '#ec4899', '#d97706'];
+    const ACCOUNT_TYPES = { bank: 'Bank', card: 'Credit card', ewallet: 'E-wallet', cash: 'Cash' };
+    // One plan per payday: '15' and '30' when planning per kinsena, 'month' when planning per month.
+    const PLAN_KEYS = ['15', '30', 'month'];
+    const monthly = Number(tile.dataset.monthly) || 0;
+    const nextPayday = tile.dataset.nextPayday;
+    const peso = (n) => `₱${n.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+    const round2 = (n) => Math.round(n * 100) / 100;
+    // Templates keep this component's scoped styles on every copy.
+    const clone = (id) => document.getElementById(id).content.firstElementChild.cloneNode(true);
+
+    const rowsEl = document.getElementById('alloc-rows');
+    const statusEl = document.getElementById('alloc-status');
+    const takeHomeInput = document.getElementById('alloc-takehome');
+    const presetSelect = document.getElementById('alloc-preset');
+    const accountsEl = document.getElementById('alloc-accounts');
+    const accountForm = document.getElementById('alloc-account-form');
+    const transfersEl = document.getElementById('alloc-transfers');
+    const copyBtn = document.getElementById('alloc-copy');
+    const accountNameInput = document.getElementById('alloc-account-name');
+    const accountTypeSelect = document.getElementById('alloc-account-type');
+
+    // Known banks and e-wallets (src/lib/institutions.ts), matched by whole words in the account name.
+    const escapeRe = (s) => s.replace(/[.*+?^$()|[\]\\{}]/g, '\\$&');
+    const INSTITUTIONS = JSON.parse(document.getElementById('alloc-institutions-data').textContent).map(i => ({
+      ...i, re: new RegExp('(^|[^a-z0-9])(' + i.aliases.map(escapeRe).join('|') + ')($|[^a-z0-9])'),
+    }));
+    const institutionOf = (a) => a.type === 'cash' ? null : INSTITUTIONS.find(i => i.re.test(a.name.toLowerCase()));
+    const monogram = (name) => name.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
+
+    // A known institution shows its app icon and tints `host` in its brand color. Anything else gets
+    // a neutral monogram (₱ for cash) rather than a made-up color.
+    function paintLogo(el, account, host) {
+      const inst = institutionOf(account);
+      el.replaceChildren();
+      if (inst) {
+        const img = new Image();
+        img.src = `/banks/${inst.id}.png`;
+        img.alt = '';
+        el.append(img);
+      }
+      el.dataset.mono = inst ? '' : account.type === 'cash' ? '₱' : monogram(account.name);
+      el.title = inst ? inst.name : account.name;
+      if (host) host.style.setProperty('--brand', inst ? inst.color : '');
+    }
+    // The logo beside a bucket's account picker or legend line; hidden while it goes nowhere.
+    function paintAccountLogo(el, accountId) {
+      const account = state.accounts.find(a => a.id === accountId);
+      el.hidden = !account;
+      if (account) paintLogo(el, account);
+    }
+
+    // Older saves stored buckets as { name, pct } and had no accounts.
+    const toBucket = (b, i) => ({
+      name: String(b.name ?? ''),
+      value: Math.max(0, Number(b.value ?? b.pct) || 0),
+      unit: b.unit === '₱' ? '₱' : '%',
+      color: /^#[0-9a-f]{6}$/i.test(b.color) ? b.color : COLORS[i % COLORS.length],
+      account: String(b.account ?? ''),
+    });
+    const fromPreset = (json) => JSON.parse(json).map(([name, value], i) => toBucket({ name, value }, i));
+
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(STORE)); } catch {}
+    const state = {
+      // Kinsena = one 15th/30th payday (half the monthly rate). Defaults to the pay schedule.
+      per: saved?.per === 'month' || saved?.per === 'kinsena' ? saved.per : tile.dataset.per,
+      plans: {},
+      // Per plan. Missing = the full gross, which is right until deductions (SSS, PhilHealth, tax)
+      // start — and those often come off one kinsena more than the other.
+      takeHome: {},
+      accounts: Array.isArray(saved?.accounts) ? saved.accounts : [],
+    };
+    for (const k of PLAN_KEYS) {
+      if (Array.isArray(saved?.plans?.[k])) state.plans[k] = saved.plans[k].map(toBucket);
+      if (typeof saved?.takeHome?.[k] === 'number') state.takeHome[k] = saved.takeHome[k];
+    }
+    // Earlier saves held a single plan; it becomes the 15th's (the 30th then starts as its copy).
+    if (Array.isArray(saved?.buckets)) {
+      const k = state.per === 'month' ? 'month' : '15';
+      state.plans[k] = saved.buckets.map(toBucket);
+      if (typeof saved.takeHome === 'number') state.takeHome[k] = saved.takeHome;
+    }
+    // Which kinsena the modal is showing. Starts on the one coming up; not saved.
+    let payday = nextPayday;
+
+    const gross = () => state.per === 'kinsena' ? monthly / 2 : monthly;
+    const keyFor = (day) => state.per === 'month' ? 'month' : day;
+    const activeKey = () => keyFor(payday);
+    const plan = () => state.plans[activeKey()];
+    const payOf = (k) => state.takeHome[k] ?? gross();
+    // Fixed buckets are the pesos entered; percent buckets are a share of that payday's take-home.
+    const amountOf = (b, pay) => b.unit === '₱' ? b.value : pay * b.value / 100;
+    const unassigned = () => {
+      const pay = payOf(activeKey());
+      return round2(pay - plan().reduce((sum, b) => sum + amountOf(b, pay), 0));
+    };
+    const accountLabel = (a) => `${a.name} · ${ACCOUNT_TYPES[a.type] || 'Account'}`;
+
+    // A copy across periods scales fixed pesos (a month is two kinsenas); percentages carry as-is.
+    function copyPlan(from, to) {
+      const k = (from === 'month') === (to === 'month') ? 1 : to === 'month' ? 2 : 0.5;
+      state.plans[to] = state.plans[from].map(b => ({ ...b, value: b.unit === '₱' ? round2(b.value * k) : b.value }));
+    }
+    // A plan seen for the first time starts from an existing one, else the default preset.
+    function ensurePlan(k) {
+      if (state.plans[k]) return;
+      const from = PLAN_KEYS.find(f => f !== k && state.plans[f]);
+      if (from) copyPlan(from, k);
+      else state.plans[k] = fromPreset(presetSelect.options[1].value);
+    }
+
+    // The tile always previews the next payday's plan, whichever one the modal is editing.
+    function paintTile() {
+      const k = keyFor(nextPayday);
+      ensurePlan(k);
+      const pay = payOf(k);
+      document.getElementById('alloc-tile-amount').textContent = peso(pay);
+      document.getElementById('alloc-tile-period').textContent =
+        k === 'month' ? 'Per month.' : `${k}th kinsena — your next payday.`;
+      document.getElementById('alloc-tile-bar').replaceChildren(...state.plans[k].map(b => {
+        const seg = document.createElement('span');
+        seg.style.width = `${pay ? amountOf(b, pay) / pay * 100 : 0}%`;
+        seg.style.background = b.color;
+        return seg;
+      }));
+      document.getElementById('alloc-tile-legend').replaceChildren(...state.plans[k].map(b => {
+        const li = clone('alloc-legend-tpl');
+        li.querySelector('.alloc-dot').style.background = b.color;
+        li.querySelector('.alloc-legend-name').textContent = b.name || 'Untitled';
+        paintAccountLogo(li.querySelector('.acct-logo'), b.account);
+        li.querySelector('.alloc-legend-amount').textContent = peso(amountOf(b, pay));
+        return li;
+      }));
+    }
+
+    // One line per account: what to move there on this payday, and which buckets that covers.
+    function paintTransfers() {
+      const pay = payOf(activeKey());
+      transfersEl.hidden = state.accounts.length === 0;
+      const groups = [...state.accounts, { id: '', name: 'Not assigned to an account' }]
+        .map(a => ({ a, buckets: plan().filter(b => b.account === a.id) }))
+        .filter(g => g.buckets.length);
+      document.getElementById('alloc-transfer-list').replaceChildren(...groups.map(({ a, buckets }) => {
+        const li = clone('alloc-transfer-tpl');
+        li.classList.toggle('none', !a.id);
+        if (a.id) paintLogo(li.querySelector('.acct-logo'), a, li);
+        else li.querySelector('.acct-logo').remove();
+        li.querySelector('.alloc-transfer-name').textContent = a.id ? accountLabel(a) : a.name;
+        li.querySelector('.alloc-transfer-buckets').textContent = buckets.map(b => b.name || 'Untitled').join(', ');
+        li.querySelector('.alloc-transfer-amount').textContent = peso(buckets.reduce((sum, b) => sum + amountOf(b, pay), 0));
+        return li;
+      }));
+    }
+
+    // Amounts, status, tile and transfers only — the inputs stay put so typing never loses focus.
+    function update() {
+      const pay = payOf(activeKey());
+      rowsEl.querySelectorAll('.alloc-row').forEach((row, i) => {
+        const b = plan()[i];
+        row.querySelector('.alloc-amount').textContent = peso(amountOf(b, pay));
+        // A fixed amount reads better with its share of pay beside it.
+        row.querySelector('.alloc-share').textContent = b.unit === '₱' && pay ? `${round2(b.value / pay * 100)}% of pay` : '';
+      });
+      const left = unassigned();
+      const leftPct = pay ? round2(left / pay * 100) : 0;
+      const settled = Math.abs(left) < 1;
+      statusEl.className = `alloc-status ${settled ? 'ok' : left > 0 ? 'under' : 'over'}`;
+      statusEl.textContent = settled
+        ? '100% allocated — every peso has a job.'
+        : left > 0
+          ? `${peso(left)} (${leftPct}%) still unassigned.`
+          : `Over by ${peso(-left)} (${-leftPct}%) — trim a bucket.`;
+      paintTile();
+      paintTransfers();
+      try { localStorage.setItem(STORE, JSON.stringify(state)); } catch {}
+    }
+
+    function renderRows() {
+      rowsEl.replaceChildren(...plan().map((b, i) => {
+        const row = clone('alloc-row-tpl');
+        row.dataset.i = i;
+        row.querySelector('.alloc-color').value = b.color;
+        row.querySelector('.alloc-name').value = b.name;
+        row.querySelector('.alloc-value').value = b.value;
+        row.querySelector('.alloc-unit').textContent = b.unit;
+        row.querySelector('.alloc-up').disabled = i === 0;
+        row.querySelector('.alloc-down').disabled = i === plan().length - 1;
+        const account = row.querySelector('.alloc-account');
+        account.append(new Option('Goes to… (no account)', ''), ...state.accounts.map(a => new Option(accountLabel(a), a.id)));
+        account.value = b.account;
+        row.querySelector('.alloc-account-wrap').hidden = state.accounts.length === 0;
+        paintAccountLogo(row.querySelector('.acct-logo'), b.account);
+        return row;
+      }));
+      update();
+    }
+
+    // Everything that names the period or payday being edited.
+    function paintPeriod() {
+      const k = activeKey();
+      ensurePlan(k);
+      const mark = (attr, value) => document.querySelectorAll(`[${attr}]`).forEach(btn => {
+        const on = btn.getAttribute(attr) === value;
+        btn.classList.toggle('active', on);
+        btn.setAttribute('aria-pressed', on);
+      });
+      mark('data-alloc-per', state.per);
+      mark('data-alloc-payday', payday);
+      document.getElementById('alloc-paydays').hidden = state.per === 'month';
+      copyBtn.textContent = `Copy the ${payday === '15' ? '30' : '15'}th plan here`;
+
+      const when = k === 'month' ? 'per month' : `on the ${k}th`;
+      document.getElementById('alloc-takehome-label').textContent = `Take-home ${when}`;
+      document.getElementById('alloc-gross-hint').textContent =
+        `Gross is ${peso(gross())} per ${state.per === 'kinsena' ? 'kinsena' : 'month'}. Leave this blank to plan with all of it — lower it only once deductions (SSS, PhilHealth, Pag-IBIG, tax) start.`;
+      document.getElementById('alloc-transfers-label').textContent = `Transfers ${when}`;
+      takeHomeInput.placeholder = gross().toFixed(2);
+      takeHomeInput.value = state.takeHome[k] ?? '';
+    }
+
+    function renderAccounts() {
+      accountsEl.replaceChildren(...state.accounts.map(a => {
+        const chip = clone('alloc-account-tpl');
+        chip.dataset.id = a.id;
+        paintLogo(chip.querySelector('.acct-logo'), a, chip);
+        chip.querySelector('.alloc-chip-type').textContent = ACCOUNT_TYPES[a.type] || 'Account';
+        chip.querySelector('.alloc-chip-name').textContent = a.name;
+        return chip;
+      }));
+      renderRows(); // every row's account picker lists these
+    }
+
+    rowsEl.addEventListener('input', (e) => {
+      const row = e.target.closest('.alloc-row');
+      if (!row) return;
+      const b = plan()[Number(row.dataset.i)];
+      if (e.target.matches('.alloc-name')) b.name = e.target.value;
+      else if (e.target.matches('.alloc-color')) b.color = e.target.value;
+      else if (e.target.matches('.alloc-account')) {
+        b.account = e.target.value;
+        paintAccountLogo(row.querySelector('.acct-logo'), b.account);
+      }
+      else if (e.target.matches('.alloc-value')) b.value = Math.max(0, parseFloat(e.target.value) || 0);
+      update();
+    });
+    rowsEl.addEventListener('click', (e) => {
+      const btn = e.target.closest('button');
+      const row = btn?.closest('.alloc-row');
+      if (!row) return;
+      const i = Number(row.dataset.i);
+      const buckets = plan();
+      const b = buckets[i];
+      if (btn.matches('.alloc-unit')) {
+        // Convert so the peso amount stays put when switching units.
+        const pay = payOf(activeKey());
+        b.value = b.unit === '%' ? round2(pay * b.value / 100) : (pay ? round2(b.value / pay * 100) : 0);
+        b.unit = b.unit === '%' ? '₱' : '%';
+        row.querySelector('.alloc-value').value = b.value;
+        btn.textContent = b.unit;
+        update();
+        return;
+      }
+      if (btn.matches('.alloc-remove')) {
+        buckets.splice(i, 1);
+      } else {
+        const j = btn.matches('.alloc-up') ? i - 1 : i + 1;
+        [buckets[i], buckets[j]] = [buckets[j], buckets[i]];
+      }
+      renderRows();
+    });
+    document.getElementById('alloc-add').addEventListener('click', () => {
+      const pay = payOf(activeKey());
+      const leftPct = pay ? round2(unassigned() / pay * 100) : 0;
+      plan().push(toBucket({ name: 'New bucket', value: Math.max(0, leftPct) }, plan().length));
+      renderRows();
+      rowsEl.lastElementChild?.querySelector('.alloc-name').select();
+    });
+    presetSelect.addEventListener('change', () => {
+      const chosen = presetSelect.value;
+      presetSelect.value = '';
+      if (!chosen || !confirm('Replace these buckets with this preset?')) return;
+      state.plans[activeKey()] = fromPreset(chosen);
+      renderRows();
+    });
+    document.querySelectorAll('[data-alloc-per]').forEach(btn => btn.addEventListener('click', () => {
+      state.per = btn.dataset.allocPer;
+      paintPeriod();
+      renderRows();
+    }));
+    document.querySelectorAll('[data-alloc-payday]').forEach(btn => btn.addEventListener('click', () => {
+      payday = btn.dataset.allocPayday;
+      paintPeriod();
+      renderRows();
+    }));
+    copyBtn.addEventListener('click', () => {
+      const other = payday === '15' ? '30' : '15';
+      if (!confirm(`Replace the ${payday}th plan with a copy of the ${other}th?`)) return;
+      ensurePlan(other);
+      copyPlan(other, payday);
+      renderRows();
+    });
+    takeHomeInput.addEventListener('input', () => {
+      const v = parseFloat(takeHomeInput.value);
+      if (Number.isFinite(v) && v >= 0) state.takeHome[activeKey()] = v;
+      else delete state.takeHome[activeKey()];
+      update();
+    });
+
+    // Typing a known name picks its type (GCash → E-wallet); a card network in the name → Credit card.
+    accountNameInput.addEventListener('input', () => {
+      const name = accountNameInput.value.toLowerCase();
+      const inst = INSTITUTIONS.find(i => i.re.test(name));
+      if (/(^|[^a-z])(visa|mastercard|credit|amex|jcb)([^a-z]|$)/.test(name)) accountTypeSelect.value = 'card';
+      else if (inst) accountTypeSelect.value = inst.type;
+    });
+    accountForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const name = accountNameInput.value.trim();
+      if (!name) return;
+      // Random tail: two accounts added within the same millisecond must not share an id.
+      state.accounts.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name, type: accountTypeSelect.value });
+      accountNameInput.value = '';
+      renderAccounts();
+    });
+    accountsEl.addEventListener('click', (e) => {
+      const chip = e.target.closest('.alloc-chip-remove')?.closest('.alloc-chip');
+      if (!chip) return;
+      state.accounts = state.accounts.filter(a => a.id !== chip.dataset.id);
+      Object.values(state.plans).flat().forEach(b => { if (b.account === chip.dataset.id) b.account = ''; });
+      renderAccounts();
+    });
+
+    const open = () => { modal.style.display = 'flex'; document.body.style.overflow = 'hidden'; };
+    const close = () => { modal.style.display = 'none'; document.body.style.overflow = ''; };
+    document.getElementById('open-alloc').addEventListener('click', open);
+    document.getElementById('alloc-close').addEventListener('click', close);
+    modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && modal.style.display === 'flex') close();
+    });
+
+    paintPeriod();
+    renderAccounts();
   })();
 
   // Progress Trend chart: crosshair + tooltip on hover/touch
@@ -1018,6 +1535,165 @@ if (!settings.isEmployee) {
     .bd-row { flex-direction: column; align-items: stretch; gap: 12px; }
     .bd-values { justify-content: space-between; }
     .bd-amount-group { align-items: flex-start; }
+  }
+
+  /* Salary allocation tile + calculator (employees) */
+  .alloc-bar { display: flex; gap: 2px; height: 8px; margin-top: 12px; border-radius: 4px; overflow: hidden; background: rgba(127,127,127,.1); }
+  .alloc-bar > :global(span) { flex-shrink: 0; height: 100%; transition: width .3s; }
+  .alloc-legend { list-style: none; margin: 10px 0 12px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+  .alloc-legend li { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-secondary); }
+  .alloc-legend-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .alloc-legend-amount { font-weight: 700; color: var(--text-primary); }
+  .alloc-legend .acct-logo { width: 14px; height: 14px; border-radius: 4px; font-size: 6.5px; }
+  .alloc-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+  /* The whole modal scrolls, not just the bucket list — accounts and transfers sit around it. */
+  .alloc-modal-content { overflow-y: auto; }
+  .alloc-section { display: flex; flex-direction: column; gap: 8px; margin-top: 20px; }
+  .alloc-section[hidden] { display: none; }
+  .alloc-section-label, .alloc-takehome {
+    font-size: 11px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .05em;
+  }
+  .alloc-takehome { display: flex; flex-direction: column; gap: 6px; margin-top: 16px; }
+  /* Same look as the tracker's source filter tabs; grey tints so it holds up in light mode too. */
+  .alloc-per {
+    display: flex; gap: 2px; margin-top: 18px; padding: 3px; border-radius: 8px;
+    background: rgba(127,127,127,.05); border: 1px solid var(--border-subtle);
+  }
+  .alloc-per button {
+    flex: 1; padding: 7px 14px; border-radius: 6px; border: none; background: none; cursor: pointer;
+    font-family: inherit; font-size: 12px; font-weight: 600; color: var(--text-secondary); transition: all .2s;
+  }
+  .alloc-per button:hover { color: var(--text-primary); }
+  .alloc-per button.active { background: rgba(127,127,127,.14); color: var(--text-primary); }
+  /* 15th / 30th: a second row under the period switch, marked in the accent like the week-now tag. */
+  .alloc-paydays { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+  .alloc-paydays[hidden] { display: none; }
+  .alloc-paydays .alloc-per { margin-top: 0; flex: 0 0 180px; }
+  .alloc-paydays .alloc-per button.active { background: rgba(237,102,33,.14); color: var(--ntv-orange); }
+  .alloc-paydays .stat-explain-link { margin-left: auto; font-size: 12px; }
+  .alloc-takehome small { font-size: 11px; font-weight: 500; line-height: 1.5; text-transform: none; letter-spacing: 0; }
+  .alloc-takehome-input { display: flex; align-items: center; gap: 8px; }
+
+  .alloc-takehome-input input, .alloc-row input, .alloc-row select, .alloc-account-form input, .alloc-account-form select, .alloc-preset {
+    width: 100%; min-width: 0; padding: 8px 10px; border-radius: 8px; box-shadow: none;
+    background: rgba(127,127,127,.08); border: 1px solid var(--border-subtle);
+    color: var(--text-primary); font-family: inherit; font-size: 13px; outline: none;
+  }
+  .alloc-takehome-input input { font-size: 16px; font-weight: 700; }
+  .alloc-takehome-input input:focus, .alloc-row input:focus, .alloc-row select:focus, .alloc-account-form input:focus, .alloc-account-form select:focus {
+    border-color: var(--ntv-orange); background: rgba(237,102,33,.04); box-shadow: none;
+  }
+  .alloc-modal-content option { background: var(--modal-bg); color: var(--text-primary); }
+
+  /* Account logos: the institution's app icon, or a neutral monogram for anything unlisted. */
+  .acct-logo {
+    display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+    width: 22px; height: 22px; border-radius: 6px; overflow: hidden;
+    background: rgba(127,127,127,.16); color: var(--text-secondary); font-size: 9px; font-weight: 800;
+    /* Hairline ring so black (Maya) and white (Grab, HSBC) icons keep their edge in either theme. */
+    box-shadow: 0 0 0 1px rgba(127,127,127,.28);
+  }
+  .acct-logo[hidden] { display: none; }
+  .acct-logo > :global(img) { display: block; width: 100%; height: 100%; object-fit: cover; }
+  .acct-logo::after { content: attr(data-mono); }
+
+  .alloc-accounts { display: flex; flex-wrap: wrap; gap: 6px; }
+  .alloc-accounts:empty { display: none; }
+  /* --brand is set per account; unlisted ones stay grey. */
+  .alloc-chip {
+    display: inline-flex; align-items: center; gap: 7px; padding: 3px 4px 3px 3px; border-radius: 999px;
+    font-size: 12px; color: var(--text-primary);
+    background: color-mix(in srgb, var(--brand, rgb(127 127 127)) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--brand, rgb(127 127 127)) 40%, transparent);
+  }
+  .alloc-chip .acct-logo { border-radius: 50%; }
+  .alloc-chip-type { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-secondary); }
+  .alloc-chip-name { font-weight: 600; }
+  .alloc-chip-remove {
+    display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%;
+    background: none; border: none; color: var(--text-secondary); cursor: pointer;
+  }
+  .alloc-chip-remove:hover { background: rgba(248,113,113,.12); color: #f87171; }
+  .alloc-account-form { display: grid; grid-template-columns: 1fr 130px auto; gap: 8px; }
+
+  .alloc-rows { display: flex; flex-direction: column; gap: 8px; }
+  .alloc-row {
+    display: grid; grid-template-columns: 18px 22px 1fr 124px 96px 28px; align-items: center; gap: 8px 10px;
+    padding: 10px 12px; border-radius: 12px; background: rgba(127,127,127,.05); border: 1px solid var(--border-subtle);
+  }
+  .alloc-move { grid-row: 1; grid-column: 1; display: flex; flex-direction: column; }
+  .alloc-move button {
+    display: flex; align-items: center; justify-content: center; height: 16px; padding: 0;
+    background: none; border: none; color: var(--text-secondary); cursor: pointer;
+  }
+  .alloc-move button:hover:not(:disabled) { color: var(--ntv-orange); }
+  .alloc-move button:disabled { opacity: .25; cursor: default; }
+  .alloc-row .alloc-color {
+    width: 22px; height: 22px; padding: 0; border: none; border-radius: 50%; background: none; cursor: pointer;
+    -webkit-appearance: none; appearance: none;
+  }
+  .alloc-color::-webkit-color-swatch-wrapper { padding: 0; }
+  .alloc-color::-webkit-color-swatch { border: none; border-radius: 50%; }
+  .alloc-color::-moz-color-swatch { border: none; border-radius: 50%; }
+  .alloc-value-wrap { display: flex; align-items: center; gap: 4px; }
+  .alloc-row .alloc-value { text-align: right; }
+  .alloc-unit {
+    flex-shrink: 0; width: 30px; height: 32px; border-radius: 8px; cursor: pointer;
+    background: rgba(237,102,33,.1); border: 1px solid rgba(237,102,33,.25); color: var(--ntv-orange);
+    font-family: inherit; font-size: 12px; font-weight: 800;
+  }
+  .alloc-unit:hover { background: rgba(237,102,33,.18); }
+  .alloc-amount-wrap { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+  .alloc-amount { font-size: 14px; font-weight: 800; color: var(--text-primary); white-space: nowrap; }
+  .alloc-share { font-size: 10.5px; color: var(--text-secondary); white-space: nowrap; }
+  .alloc-share:empty { display: none; }
+  .alloc-remove {
+    display: flex; align-items: center; justify-content: center; width: 28px; height: 28px;
+    border-radius: 8px; background: none; border: none; color: var(--text-secondary); cursor: pointer; transition: all .2s;
+  }
+  .alloc-remove:hover { background: rgba(248,113,113,.12); color: #f87171; }
+  .alloc-account-wrap { grid-row: 2; grid-column: 3 / 5; display: flex; align-items: center; gap: 8px; }
+  .alloc-account-wrap[hidden] { display: none; }
+  .alloc-row .alloc-account { font-size: 12px; padding: 6px 8px; }
+
+  .alloc-status { margin: 12px 0 0; padding: 8px 12px; border-radius: 8px; font-size: 12px; font-weight: 700; }
+  .alloc-status.ok { color: #34d399; background: rgba(52,211,153,.1); }
+  .alloc-status.under { color: #fbbf24; background: rgba(251,191,36,.1); }
+  .alloc-status.over { color: #f87171; background: rgba(248,113,113,.1); }
+  /* Darker steps on white; the dark-theme tints are too faint to read there. */
+  :global(.light-mode) .alloc-status.ok { color: #047857; }
+  :global(.light-mode) .alloc-status.under { color: #b45309; }
+  :global(.light-mode) .alloc-status.over { color: #dc2626; }
+  .alloc-actions { display: flex; gap: 8px; margin-top: 12px; }
+  .alloc-actions .bd-btn-edit { flex-shrink: 0; }
+  .alloc-preset { flex: 1; font-size: 11.5px; font-weight: 700; cursor: pointer; }
+
+  .alloc-transfers { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  .alloc-transfers li {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px 10px 10px; border-radius: 10px;
+    background: color-mix(in srgb, var(--brand, rgb(127 127 127)) 8%, transparent);
+    border: 1px solid color-mix(in srgb, var(--brand, rgb(127 127 127)) 30%, transparent);
+  }
+  .alloc-transfers li.none { background: rgba(127,127,127,.05); border-style: dashed; border-color: var(--border-subtle); padding-left: 14px; }
+  .alloc-transfer-account { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .alloc-transfers .acct-logo { width: 32px; height: 32px; border-radius: 8px; font-size: 11px; }
+  .alloc-transfer-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .alloc-transfer-name { font-size: 13px; font-weight: 700; color: var(--text-primary); }
+  .alloc-transfer-buckets { font-size: 11px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .alloc-transfer-amount { font-size: 15px; font-weight: 800; color: var(--text-primary); white-space: nowrap; }
+
+  @media (max-width: 600px) {
+    .alloc-row { grid-template-columns: 18px 22px 1fr 1fr 28px; }
+    .alloc-row .alloc-color { grid-row: 1; grid-column: 2; }
+    .alloc-row .alloc-name { grid-row: 1; grid-column: 3 / 5; }
+    .alloc-remove { grid-row: 1; grid-column: 5; }
+    .alloc-value-wrap { grid-row: 2; grid-column: 2 / 4; }
+    .alloc-amount-wrap { grid-row: 2; grid-column: 4 / 6; }
+    .alloc-account-wrap { grid-row: 3; grid-column: 2 / 6; }
+    .alloc-account-form { grid-template-columns: 1fr auto; }
+    .alloc-account-form input { grid-column: 1 / -1; }
+    .alloc-actions { flex-direction: column; }
   }
 
   .weekly-chart-card { background: var(--card-bg); border: 1px solid var(--border-subtle); border-radius: 24px; padding: 24px; }

@@ -2,6 +2,8 @@ import type { APIRoute } from 'astro';
 import { saveAppSettings, getAppSettings } from '../../lib/settings';
 import { getSession } from '../../lib/auth';
 import { parse } from 'cookie';
+import { recordSalaryChange } from '../../lib/salary';
+import { manilaDate } from '../../lib/utils';
 
 export const POST: APIRoute = async ({ request }) => {
   // Simple auth check
@@ -158,6 +160,18 @@ export const POST: APIRoute = async ({ request }) => {
       userEmail: session.email,
       userPicture: session.picture
     });
+
+    // A different monthly rate is a raise (or a cut) worth keeping on record, not just an overwrite.
+    if (isEmployee && !isNaN(monthlyRate) && monthlyRate !== (existingSettings.monthlyRate || 0)) {
+      const rawEffective = formData.get('rateEffectiveDate') as string;
+      const effectiveDate = /^\d{4}-\d{2}-\d{2}$/.test(rawEffective || '') ? rawEffective : manilaDate();
+      try {
+        await recordSalaryChange(session.id, existingSettings.monthlyRate || 0, monthlyRate, effectiveDate, employeeStartDate || '');
+      } catch (err) {
+        // The new rate is already saved; a failed history row shouldn't turn the save into an error.
+        console.error('Salary history write failed:', err);
+      }
+    }
 
     const finalUrl = new URL(redirectUrl, request.url);
     const { addSyncLog } = await import('../../lib/logs');
