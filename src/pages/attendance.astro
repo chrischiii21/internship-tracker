@@ -6,6 +6,7 @@ import { getSession } from "../lib/auth";
 import { parse } from "cookie";
 import AttendanceData from "../components/AttendanceData.astro";
 import AttendanceCalendar from "../components/AttendanceCalendar.astro";
+import MonthNav from "../components/MonthNav.astro";
 import { getAppSettings } from "../lib/settings";
 import { supabase } from "../lib/supabase";
 import { getAttendanceConfig, getHolidays, DEFAULT_ATTENDANCE_CONFIG } from "../lib/attendance";
@@ -139,22 +140,7 @@ const [config, holidays] = isEditable
               </>
             )
           }
-          <select id="month-selector" class="att-select">
-            {
-              Array.from({ length: 12 }).map((_, i) => (
-                <option value={i + 1} selected={month === i + 1}>
-                  {new Date(0, i).toLocaleString("en-US", { month: "long" })}
-                </option>
-              ))
-            }
-          </select>
-          <select id="year-selector" class="att-select">
-            {
-              [2024, 2025, 2026].map((y) => (
-                <option value={y} selected={year === y}>{y}</option>
-              ))
-            }
-          </select>
+          <MonthNav month={month} year={year} />
         </div>
 
         {isEditable && (

@@ -1,0 +1,146 @@
+---
+// ‹ October 2026 › — arrows step a month, the label opens a month grid. It drives the page's hidden
+// #month-selector / #year-selector and fires their `change`, so each page's month-loading code
+// stays as it was.
+interface Props { month: number; year: number; }
+const { month, year } = Astro.props;
+const MIN_YEAR = 2024;
+const maxYear = Math.max(new Date().getFullYear(), year) + 1;
+const years = Array.from({ length: maxYear - MIN_YEAR + 1 }, (_, i) => MIN_YEAR + i);
+const monthName = (i: number, style: 'long' | 'short') => new Date(2000, i).toLocaleString('en-US', { month: style });
+---
+<div class="month-nav" data-min-year={MIN_YEAR} data-max-year={maxYear}>
+  <select id="month-selector" hidden>
+    {Array.from({ length: 12 }, (_, i) => <option value={i + 1} selected={month === i + 1}>{monthName(i, 'long')}</option>)}
+  </select>
+  <select id="year-selector" hidden>
+    {years.map(y => <option value={y} selected={year === y}>{y}</option>)}
+  </select>
+
+  <button type="button" class="mn-btn" data-mn-step="-1" aria-label="Previous month">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+  </button>
+  <button type="button" class="mn-label" aria-haspopup="true" aria-expanded="false">
+    <span class="mn-label-text">{monthName(month - 1, 'long')} {year}</span>
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+  </button>
+  <button type="button" class="mn-btn" data-mn-step="1" aria-label="Next month">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+  </button>
+
+  <div class="mn-pop" hidden>
+    <div class="mn-pop-head">
+      <button type="button" class="mn-btn" data-mn-year="-1" aria-label="Previous year">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
+      <span class="mn-pop-year">{year}</span>
+      <button type="button" class="mn-btn" data-mn-year="1" aria-label="Next year">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+    </div>
+    <div class="mn-grid">
+      {Array.from({ length: 12 }, (_, i) => <button type="button" data-mn-month={i + 1}>{monthName(i, 'short')}</button>)}
+    </div>
+  </div>
+</div>
+
+<script>
+  document.querySelectorAll<HTMLElement>('.month-nav').forEach((nav) => {
+    const mSel = nav.querySelector<HTMLSelectElement>('#month-selector')!;
+    const ySel = nav.querySelector<HTMLSelectElement>('#year-selector')!;
+    const label = nav.querySelector<HTMLButtonElement>('.mn-label')!;
+    const pop = nav.querySelector<HTMLElement>('.mn-pop')!;
+    const popYear = nav.querySelector<HTMLElement>('.mn-pop-year')!;
+    const minYear = Number(nav.dataset.minYear);
+    const maxYear = Number(nav.dataset.maxYear);
+    const prev = nav.querySelector<HTMLButtonElement>('[data-mn-step="-1"]')!;
+    const next = nav.querySelector<HTMLButtonElement>('[data-mn-step="1"]')!;
+    const yPrev = nav.querySelector<HTMLButtonElement>('[data-mn-year="-1"]')!;
+    const yNext = nav.querySelector<HTMLButtonElement>('[data-mn-year="1"]')!;
+    let viewYear = Number(ySel.value);
+
+    const paint = () => {
+      const m = Number(mSel.value), y = Number(ySel.value);
+      nav.querySelector('.mn-label-text')!.textContent = `${mSel.options[mSel.selectedIndex].text} ${y}`;
+      prev.disabled = y === minYear && m === 1;
+      next.disabled = y === maxYear && m === 12;
+      popYear.textContent = String(viewYear);
+      yPrev.disabled = viewYear <= minYear;
+      yNext.disabled = viewYear >= maxYear;
+      nav.querySelectorAll<HTMLButtonElement>('[data-mn-month]').forEach((b) => {
+        b.classList.toggle('active', viewYear === y && Number(b.dataset.mnMonth) === m);
+      });
+    };
+    const toggle = (open: boolean) => {
+      pop.hidden = !open;
+      label.setAttribute('aria-expanded', String(open));
+      if (open) { viewYear = Number(ySel.value); paint(); }
+    };
+    // The page locks the selects while a month loads; ignore clicks until it lets go.
+    const go = (m: number, y: number) => {
+      if (mSel.disabled) return;
+      if (m < 1) { m = 12; y--; } else if (m > 12) { m = 1; y++; }
+      if (y < minYear || y > maxYear) return;
+      mSel.value = String(m);
+      ySel.value = String(y);
+      toggle(false);
+      paint();
+      mSel.dispatchEvent(new Event('change'));
+    };
+
+    prev.addEventListener('click', () => go(Number(mSel.value) - 1, Number(ySel.value)));
+    next.addEventListener('click', () => go(Number(mSel.value) + 1, Number(ySel.value)));
+    label.addEventListener('click', () => toggle(pop.hidden));
+    nav.addEventListener('click', (e) => {
+      const t = e.target as HTMLElement;
+      const yearBtn = t.closest<HTMLButtonElement>('[data-mn-year]');
+      if (yearBtn) { viewYear += Number(yearBtn.dataset.mnYear); paint(); }
+      const monthBtn = t.closest<HTMLButtonElement>('[data-mn-month]');
+      if (monthBtn) go(Number(monthBtn.dataset.mnMonth), viewYear);
+    });
+    document.addEventListener('click', (e) => { if (!pop.hidden && !nav.contains(e.target as Node)) toggle(false); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !pop.hidden) { toggle(false); label.focus(); } });
+    paint();
+  });
+</script>
+
+<style>
+  .month-nav { position: relative; display: inline-flex; align-items: center; gap: 6px; }
+  .mn-btn {
+    display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px;
+    border-radius: 8px; border: 1px solid var(--border-subtle); background: rgba(var(--fg-rgb), 0.04);
+    color: var(--text-primary); cursor: pointer; transition: border-color .15s, color .15s;
+  }
+  .mn-btn:hover:not(:disabled) { border-color: rgba(237, 102, 33, 0.4); color: var(--ntv-orange); }
+  .mn-btn:disabled { opacity: .3; cursor: default; }
+  .mn-label {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 34px; min-width: 160px;
+    padding: 0 14px; border-radius: 8px; border: 1px solid var(--border-subtle); background: rgba(var(--fg-rgb), 0.04);
+    color: var(--text-primary); font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; transition: border-color .15s;
+  }
+  .mn-label:hover, .mn-label[aria-expanded="true"] { border-color: rgba(237, 102, 33, 0.4); }
+  .mn-label svg { color: var(--text-secondary); }
+
+  .mn-pop {
+    position: absolute; top: calc(100% + 6px); left: 40px; z-index: 50; width: 240px; padding: 12px;
+    background: var(--modal-bg); border: 1px solid var(--border-subtle); border-radius: 12px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+  }
+  .mn-pop[hidden] { display: none; }
+  .mn-pop-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .mn-pop-head .mn-btn { width: 28px; height: 28px; }
+  .mn-pop-year { font-size: 14px; font-weight: 700; color: var(--text-primary); }
+  .mn-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .mn-grid button {
+    padding: 8px 0; border-radius: 8px; border: 1px solid transparent; background: none;
+    color: var(--text-primary); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .mn-grid button:hover { background: rgba(var(--fg-rgb), 0.06); }
+  .mn-grid button.active { background: var(--ntv-gradient); color: #fff; }
+
+  @media (max-width: 768px) {
+    .month-nav { width: 100%; }
+    .mn-label { flex: 1; }
+    .mn-pop { left: 50%; transform: translateX(-50%); }
+  }
+</style>

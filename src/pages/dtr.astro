@@ -6,6 +6,7 @@ import { getSession } from "../lib/auth";
 import { parse } from "cookie";
 import DtrData from "../components/DtrData.astro";
 import DtrSheet from "../components/DtrSheet.astro";
+import MonthNav from "../components/MonthNav.astro";
 import { getAppSettings } from "../lib/settings";
 import { supabase } from "../lib/supabase";
 
@@ -160,24 +161,7 @@ const totalRequiredHours = settings.isEmployee ? 0 : settings.targetHours;
               </>
             )
           }
-          <select id="month-selector" class="dtr-select">
-            {
-              Array.from({ length: 12 }).map((_, i) => (
-                <option value={i + 1} selected={month === i + 1}>
-                  {new Date(0, i).toLocaleString("en-US", { month: "long" })}
-                </option>
-              ))
-            }
-          </select>
-          <select id="year-selector" class="dtr-select">
-            {
-              [2024, 2025, 2026].map((y) => (
-                <option value={y} selected={year === y}>
-                  {y}
-                </option>
-              ))
-            }
-          </select>
+          <MonthNav month={month} year={year} />
         </div>
         <div class="actions-group">
           <button onclick="window.print()" class="print-btn">
