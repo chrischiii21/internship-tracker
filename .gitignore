@@ -26,3 +26,5 @@ pnpm-debug.log*
 # OS metadata
 .DS_Store
 Thumbs.db
+# brag launch-video workspace (renders, frames, audio stems)
+brag-output/

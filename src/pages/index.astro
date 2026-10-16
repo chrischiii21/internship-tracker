@@ -135,12 +135,58 @@ const jsonLd = {
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="20" height="20"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.35-8.16 2.35-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
           <span>Continue with Google</span>
         </a>
-        <a href="#overview" class="lp-secondary-btn">See how it works</a>
+        <a href="#watch" class="lp-secondary-btn">See how it works</a>
       </div>
       <div class="sec-badge">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M12 2L3 7V12C3 16.55 6.84 20.74 12 22C17.16 20.74 21 16.55 21 12V7L12 2Z" stroke="var(--ntv-orange)" stroke-opacity="0.8" stroke-width="1.5" stroke-linejoin="round"/><path d="M9 12L11 14L15 10" stroke="var(--ntv-orange)" stroke-opacity="0.8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
         <span>Sign in with Google — no separate password needed</span>
       </div>
+    </section>
+
+    <!-- PROMO VIDEO: 9:16 cut on phones, 16:9 on desktop — same breakpoint as the layout below. -->
+    <section id="watch" class="lp-video-section">
+      <h2 class="lp-section-title">See InternFlow in 26 seconds</h2>
+      <p class="lp-section-sub">For interns clocking hours, and the coordinators keeping track of them.</p>
+      <div class="lp-video-wrap">
+        <video id="promo-video" class="lp-video" controls muted playsinline preload="metadata">
+          <source src="/video/internflow-promo-vertical.mp4" type="video/mp4" media="(max-width: 700px)" />
+          <source src="/video/internflow-promo.mp4" type="video/mp4" />
+        </video>
+        <button type="button" id="promo-unmute" class="lp-unmute" hidden>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+          Tap for sound
+        </button>
+      </div>
+      <script is:inline>
+        {
+          const video = document.getElementById('promo-video');
+          const unmute = document.getElementById('promo-unmute');
+          // <video> has no responsive poster, so pick the one matching the source the browser chose.
+          video.poster = matchMedia('(max-width: 700px)').matches
+            ? '/video/internflow-promo-vertical.jpg'
+            : '/video/internflow-promo.jpg';
+
+          // Browsers only autoplay muted video, so it starts silent on scroll and offers sound.
+          // Skipped for reduced-motion users; a manual pause stops the auto play/pause for good.
+          let userPaused = false;
+          let autoPausing = false;
+          video.addEventListener('pause', () => { if (!autoPausing) userPaused = true; autoPausing = false; });
+          video.addEventListener('volumechange', () => { if (!video.muted) unmute.hidden = true; });
+          unmute.addEventListener('click', () => { video.muted = false; video.play(); });
+
+          if (!matchMedia('(prefers-reduced-motion: reduce)').matches && 'IntersectionObserver' in window) {
+            new IntersectionObserver(([entry]) => {
+              if (userPaused) return;
+              if (entry.isIntersecting) {
+                video.play().then(() => { if (video.muted) unmute.hidden = false; }).catch(() => {});
+              } else if (!video.paused) {
+                autoPausing = true;
+                video.pause();
+              }
+            }, { threshold: 0.6 }).observe(video);
+          }
+        }
+      </script>
     </section>
 
     <!-- OVERVIEW -->
@@ -347,6 +393,26 @@ const jsonLd = {
     border-radius: 20px; font-size: 12px; color: var(--text-secondary);
   }
 
+  /* PROMO VIDEO */
+  .lp-video-section { position: relative; z-index: 1; max-width: 1000px; margin: 0 auto; padding: 8px 24px 40px; scroll-margin-top: 76px; }
+  .lp-video {
+    display: block; width: 100%; aspect-ratio: 16 / 9; margin: 0 auto;
+    background: #050b16; border: 1px solid var(--border-subtle); border-radius: 18px;
+    box-shadow: 0 24px 60px rgba(0,0,0,.35), 0 0 0 1px rgba(237,102,33,.08);
+  }
+
+  .lp-video-wrap { position: relative; width: 100%; margin: 0 auto; }
+  .lp-unmute {
+    position: absolute; top: 16px; right: 16px; z-index: 2;
+    display: flex; align-items: center; gap: 8px; padding: 10px 16px; min-height: 40px;
+    background: rgba(5, 11, 22, .72); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(237,102,33,.45); border-radius: 999px;
+    color: #fff; font-family: 'Outfit', sans-serif; font-size: 13px; font-weight: 700; cursor: pointer;
+    box-shadow: 0 6px 20px rgba(0,0,0,.35); transition: background .2s;
+  }
+  .lp-unmute:hover { background: rgba(237,102,33,.85); }
+  .lp-unmute[hidden] { display: none; }
+
   /* SECTIONS */
   .lp-section { position: relative; z-index: 1; max-width: 920px; margin: 0 auto; padding: 60px 24px; scroll-margin-top: 76px; }
   .lp-section-title { font-size: 28px; font-weight: 700; color: var(--text-primary); text-align: center; font-family: 'Outfit', sans-serif; letter-spacing: -.01em; }
@@ -420,6 +486,11 @@ const jsonLd = {
     .lp-secondary-btn { text-align: center; padding: 14px 24px; min-height: 48px; display: flex; align-items: center; justify-content: center; }
     .lp-final-google-btn { width: 100%; }
     .bg-glow { width: 100%; }
+    .lp-video-section { padding: 0 20px 28px; }
+    /* Portrait cut; capped so the whole video fits on screen without scrolling past it. */
+    .lp-video { aspect-ratio: 9 / 16; width: auto; height: min(78vh, 640px); max-width: 100%; border-radius: 16px; }
+    .lp-video-wrap { width: fit-content; max-width: 100%; }
+    .lp-unmute { top: 12px; right: 12px; }
   }
 
   @media (max-width: 420px) {
