@@ -68,6 +68,26 @@ ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
 
 
 -- --------------------------------------------------------------------------
+-- 1e. announcements  (REQUIRED for the admin Announcements page)
+-- --------------------------------------------------------------------------
+-- Popups the admin sends to every user. Until this runs, the Announcements page shows an error
+-- and users simply get no popup — nothing else is affected.
+
+CREATE TABLE IF NOT EXISTS public.announcements (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND 120),
+    body TEXT NOT NULL CHECK (length(body) BETWEEN 1 AND 2000),
+    max_views INTEGER NOT NULL DEFAULT 1 CHECK (max_views BETWEEN 0 AND 50), -- app opens per user; 0 = every open
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+-- If you created the table before max_views existed, this adds it (no-op otherwise).
+ALTER TABLE public.announcements
+  ADD COLUMN IF NOT EXISTS max_views INTEGER NOT NULL DEFAULT 1 CHECK (max_views BETWEEN 0 AND 50);
+ALTER TABLE public.announcements ENABLE ROW LEVEL SECURITY;
+
+
+-- --------------------------------------------------------------------------
 -- 2. Indexes for the queries the app actually runs
 -- --------------------------------------------------------------------------
 -- Hours are always read as "this user, this mode, since this date"; the coordinator roster reads

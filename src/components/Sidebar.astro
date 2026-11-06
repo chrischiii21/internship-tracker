@@ -2,6 +2,7 @@
 import { isAdmin } from '../lib/auth';
 import UnreadBadge from './UnreadBadge.astro';
 import FeatureAnnouncement from './FeatureAnnouncement.astro';
+import BroadcastPopup from './BroadcastPopup.astro';
 const { user, activeTab, isLocked = false, role = 'student' } = Astro.props;
 
 const allNavItems = [
@@ -48,6 +49,14 @@ const allNavItems = [
     roles: ['student', 'coordinator']
   },
   {
+    id: 'announcements',
+    label: 'Announcements',
+    href: '/announcements',
+    icon: `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg>`,
+    roles: ['student', 'coordinator'],
+    adminOnly: true
+  },
+  {
     id: 'settings',
     label: 'Settings', 
     href: '/settings', 
@@ -56,7 +65,8 @@ const allNavItems = [
   }
 ];
 
-const navItems = allNavItems.filter(item => item.roles?.includes(role || 'student'));
+const navItems = allNavItems.filter(item =>
+  item.roles?.includes(role || 'student') && (!item.adminOnly || isAdmin(user)));
 ---
 
 <aside id="sidebar" class={isLocked ? 'sidebar-locked' : ''}>
@@ -108,6 +118,7 @@ const navItems = allNavItems.filter(item => item.roles?.includes(role || 'studen
 </aside>
 
 {!isLocked && user && !isAdmin(user) && <FeatureAnnouncement onMessagesPage={activeTab === 'messages'} />}
+{!isLocked && user && !isAdmin(user) && <BroadcastPopup server:defer />}
 
 <style>
   #sidebar {

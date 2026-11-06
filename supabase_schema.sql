@@ -213,6 +213,18 @@ CREATE TABLE IF NOT EXISTS public.messages (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- 14. ANNOUNCEMENTS
+-- Purpose: Popups the admin sends to every user (pages/announcements.astro). Users are shown the
+-- newest active one once per device (components/BroadcastPopup.astro).
+CREATE TABLE IF NOT EXISTS public.announcements (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND 120),
+    body TEXT NOT NULL CHECK (length(body) BETWEEN 1 AND 2000),
+    max_views INTEGER NOT NULL DEFAULT 1 CHECK (max_views BETWEEN 0 AND 50), -- app opens per user; 0 = every open
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 -- ==========================================
 -- INDEXES
 -- ==========================================
@@ -248,6 +260,7 @@ ALTER TABLE public.attendance_config ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.attendance_holidays ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.shift_config ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.announcements ENABLE ROW LEVEL SECURITY;
 
 -- ==========================================
 -- MIGRATING AN EXISTING DATABASE

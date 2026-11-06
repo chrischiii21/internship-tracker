@@ -1,0 +1,208 @@
+---
+// Admin only: write a popup that every user sees once, the next time they open the app.
+// Users are shown the newest active announcement (components/BroadcastPopup.astro).
+import Layout from '../layouts/Layout.astro';
+import Header from '../components/Header.astro';
+import Sidebar from '../components/Sidebar.astro';
+import { getSession, isAdmin } from '../lib/auth';
+import { parse } from 'cookie';
+import { getAppSettings } from '../lib/settings';
+import { supabase } from '../lib/supabase';
+
+const cookies = parse(Astro.request.headers.get('cookie') || '');
+const user = cookies.session ? await getSession(cookies.session) : null;
+if (!user) return Astro.redirect('/');
+if (!isAdmin(user)) return Astro.redirect('/dashboard');
+
+const settings = await getAppSettings(user.id);
+const done = (key: 'success' | 'error', msg: string) =>
+  Astro.redirect(`/announcements?${key}=${encodeURIComponent(msg)}`);
+
+// How many separate app opens each user sees the popup for; 0 = every open until stopped.
+const VIEW_OPTIONS = [1, 2, 3, 5, 10, 0];
+const viewsLabel = (n: number) => n === 0 ? 'Every time they open the app' : n === 1 ? 'Once' : `${n} times`;
+const parseViews = (v: FormDataEntryValue | null) => {
+  const n = Number(v);
+  return VIEW_OPTIONS.includes(n) ? n : null;
+};
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const action = form.get('action');
+  const id = String(form.get('id') || '');
+
+  if (action === 'publish') {
+    const title = String(form.get('title') || '').trim();
+    const body = String(form.get('body') || '').trim();
+    if (!title || title.length > 120) return done('error', 'Title must be 1–120 characters');
+    if (!body || body.length > 2000) return done('error', 'Message must be 1–2000 characters');
+    const max_views = parseViews(form.get('max_views'));
+    if (max_views === null) return done('error', 'Pick how many times it should show');
+    const { error } = await supabase.from('announcements').insert({ title, body, max_views });
+    return error ? done('error', error.message) : done('success', 'Published — users will see it the next time they open the app');
+  }
+  if (action === 'toggle' && id) {
+    const active = form.get('active') === 'true';
+    const { error } = await supabase.from('announcements').update({ active }).eq('id', id);
+    return error ? done('error', error.message) : done('success', active ? 'Showing again' : 'Stopped showing');
+  }
+  if (action === 'views' && id) {
+    const max_views = parseViews(form.get('max_views'));
+    if (max_views === null) return done('error', 'Pick how many times it should show');
+    const { error } = await supabase.from('announcements').update({ max_views }).eq('id', id);
+    return error ? done('error', error.message) : done('success', `Now shows: ${viewsLabel(max_views).toLowerCase()}`);
+  }
+  if (action === 'delete' && id) {
+    const { error } = await supabase.from('announcements').delete().eq('id', id);
+    return error ? done('error', error.message) : done('success', 'Deleted');
+  }
+  return done('error', 'Unknown action');
+}
+
+const { data, error: loadError } = await supabase
+  .from('announcements').select('*').order('created_at', { ascending: false });
+const list = data || [];
+// The one users actually get: the newest active announcement.
+const liveId = list.find((a) => a.active)?.id;
+
+const fmt = (iso: string) => new Date(iso).toLocaleString('en-US', {
+  month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Manila',
+});
+---
+
+<Layout title="Announcements">
+  <Header user={user} />
+  <div id="portal-body">
+    <Sidebar user={user} activeTab="announcements" role={settings.role} />
+    <main id="portal-main">
+      <div class="bg-grid" aria-hidden="true"></div>
+      <div class="ann-content">
+        <div class="page-header">
+          <h1>Send an <span class="accent">Announcement</span></h1>
+          <p>A popup every user sees once, the next time they open InternFlow — on the website and in the mobile app.</p>
+        </div>
+
+        {loadError && <div class="load-error">Couldn’t load announcements: {loadError.message}</div>}
+
+        <form method="POST" class="card compose">
+          <input type="hidden" name="action" value="publish" />
+          <label for="ann-title">Title</label>
+          <input id="ann-title" name="title" maxlength="120" required placeholder="e.g. DTR export is now faster" />
+          <label for="ann-body">Message</label>
+          <textarea id="ann-body" name="body" rows="5" maxlength="2000" required
+            placeholder="What changed, why it matters, and anything users need to do."></textarea>
+          <label for="ann-views">Show it to each user</label>
+          <select id="ann-views" name="max_views">
+            {VIEW_OPTIONS.map((n) => <option value={n} selected={n === 1}>{viewsLabel(n)}</option>)}
+          </select>
+          <div class="compose-foot">
+            <span class="hint">Counted per app open, not per page — browsing between tabs counts as one. Publishing replaces whatever popup is showing now.</span>
+            <button type="submit" class="btn-primary">Publish to all users</button>
+          </div>
+        </form>
+
+        <h2 class="list-title">Past announcements</h2>
+        {list.length === 0 && <div class="card empty">Nothing published yet.</div>}
+        <div class="ann-list">
+          {list.map((a) => (
+            <article class="card ann">
+              <div class="ann-top">
+                <h3>{a.title}</h3>
+                <span class:list={['status', a.id === liveId ? 'live' : a.active ? 'queued' : 'off']}>
+                  {a.id === liveId ? 'Showing now' : a.active ? 'Replaced by newer' : 'Stopped'}
+                </span>
+              </div>
+              <p class="ann-body">{a.body}</p>
+              <div class="ann-foot">
+                <time>{fmt(a.created_at)}</time>
+                <div class="ann-actions">
+                  <form method="POST" class="views-form">
+                    <input type="hidden" name="action" value="views" />
+                    <input type="hidden" name="id" value={a.id} />
+                    <label class="sr-only" for={`views-${a.id}`}>Times shown to each user</label>
+                    <select id={`views-${a.id}`} name="max_views" onchange="this.form.submit()">
+                      {VIEW_OPTIONS.map((n) => <option value={n} selected={n === (a.max_views ?? 1)}>{viewsLabel(n)}</option>)}
+                    </select>
+                  </form>
+                  <form method="POST">
+                    <input type="hidden" name="action" value="toggle" />
+                    <input type="hidden" name="id" value={a.id} />
+                    <input type="hidden" name="active" value={a.active ? 'false' : 'true'} />
+                    <button type="submit" class="btn-ghost">{a.active ? 'Stop showing' : 'Show again'}</button>
+                  </form>
+                  <form method="POST" onsubmit="event.preventDefault(); showConfirm('Delete this announcement?', 'Delete').then(ok => ok && this.submit())">
+                    <input type="hidden" name="action" value="delete" />
+                    <input type="hidden" name="id" value={a.id} />
+                    <button type="submit" class="btn-ghost danger">Delete</button>
+                  </form>
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+      </div>
+    </main>
+  </div>
+</Layout>
+
+<script is:inline>
+  const params = new URLSearchParams(location.search);
+  for (const type of ['success', 'error']) {
+    if (params.get(type)) window.showToast?.(params.get(type), type);
+  }
+  if (params.size) history.replaceState({}, '', location.pathname);
+</script>
+
+<style>
+  #portal-body { display: flex; min-height: 100vh; padding-top: 56px; }
+  #portal-main { margin-left: 220px; flex: 1; padding: 40px; position: relative; min-width: 0; }
+  .bg-grid { position: fixed; inset: 0; background-image: linear-gradient(rgba(237, 102, 33, .04) 1px, transparent 1px), linear-gradient(90deg, rgba(237, 102, 33, .04) 1px, transparent 1px); background-size: 40px 40px; pointer-events: none; }
+  .ann-content { position: relative; z-index: 1; max-width: 760px; }
+
+  .page-header { margin-bottom: 24px; }
+  .page-header h1 { font-size: 28px; font-weight: 700; color: var(--text-primary); letter-spacing: -0.02em; }
+  .page-header p { color: var(--text-secondary); font-size: 14px; margin-top: 4px; }
+  .accent { background: var(--ntv-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .load-error { background: rgba(239, 68, 68, .1); border: 1px solid rgba(239, 68, 68, .3); color: #fca5a5; padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; }
+
+  .card { background: var(--modal-bg); border: 1px solid rgba(237, 102, 33, 0.16); border-radius: 12px; padding: 18px; }
+  .compose { display: flex; flex-direction: column; gap: 8px; margin-bottom: 32px; }
+  .compose label { font-size: 12px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .05em; }
+  .compose select, .views-form select {
+    background: rgba(127, 127, 127, 0.08); border: 1px solid rgba(237, 102, 33, 0.2); border-radius: 10px;
+    padding: 10px 12px; color: var(--text-primary); font: inherit; font-size: 14px; margin-bottom: 8px;
+  }
+  .compose select option, .views-form select option { background: var(--modal-bg); color: var(--text-primary); }
+  .views-form select { padding: 5px 8px; font-size: 12px; margin: 0; border-radius: 8px; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .compose input, .compose textarea {
+    background: rgba(127, 127, 127, 0.08); border: 1px solid rgba(237, 102, 33, 0.2); border-radius: 10px;
+    padding: 10px 12px; color: var(--text-primary); font: inherit; font-size: 14px; margin-bottom: 8px; resize: vertical;
+  }
+  .compose input:focus, .compose textarea:focus { outline: none; border-color: var(--ntv-orange); }
+  .compose-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .hint { font-size: 12px; color: var(--text-secondary); flex: 1; min-width: 200px; }
+  .btn-primary { background: var(--ntv-gradient); color: #fff; border: none; border-radius: 10px; padding: 10px 18px; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .btn-primary:hover { filter: brightness(1.15); }
+
+  .list-title { font-size: 16px; font-weight: 700; color: var(--text-primary); margin-bottom: 12px; }
+  .empty { color: var(--text-secondary); font-size: 13px; text-align: center; }
+  .ann-list { display: flex; flex-direction: column; gap: 12px; }
+  .ann-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+  .ann h3 { font-size: 15px; font-weight: 700; color: var(--text-primary); overflow-wrap: anywhere; }
+  .status { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; border-radius: 999px; padding: 3px 9px; white-space: nowrap; }
+  .status.live { color: #4ade80; background: rgba(74, 222, 128, .12); border: 1px solid rgba(74, 222, 128, .3); }
+  .status.queued, .status.off { color: var(--text-secondary); background: rgba(127, 127, 127, .1); border: 1px solid rgba(127, 127, 127, .2); }
+  .ann-body { font-size: 14px; line-height: 1.55; color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0 12px; }
+  .ann-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .ann-foot time { font-size: 11px; color: var(--text-secondary); }
+  .ann-actions { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+  .ann-actions form { margin: 0; }
+  .btn-ghost { background: none; border: 1px solid transparent; color: var(--text-secondary); font-size: 12px; font-weight: 600; border-radius: 8px; padding: 6px 10px; cursor: pointer; }
+  .btn-ghost:hover { border-color: rgba(127, 127, 127, .25); color: var(--text-primary); }
+  .btn-ghost.danger:hover { color: #f87171; border-color: rgba(248, 113, 113, .35); }
+
+  @media (max-width: 900px) {
+    #portal-main { margin-left: 0; padding: 20px 16px; width: 100%; }
+  }
+</style>
