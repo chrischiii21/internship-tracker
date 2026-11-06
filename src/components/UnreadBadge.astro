@@ -1,0 +1,32 @@
+---
+// Server island (server:defer in Sidebar.astro): unread message count on the Inbox / Feedback tab.
+// Deferred so the count query never delays a page — the badge pops in after the shell paints.
+import { getSession, isAdmin } from '../lib/auth';
+import { parse } from 'cookie';
+import { supabase } from '../lib/supabase';
+
+Astro.response.headers.set('Cache-Control', 'private, no-store');
+
+const cookies = parse(Astro.request.headers.get('cookie') || '');
+const user = cookies.session ? await getSession(cookies.session) : null;
+
+let count = 0;
+if (user) {
+  const admin = isAdmin(user);
+  // Admin: every user message not yet read. User: admin replies in their own thread not yet read.
+  let q = supabase.from('messages').select('id', { count: 'exact', head: true })
+    .eq('from_admin', !admin).is('read_at', null);
+  if (!admin) q = q.eq('thread_user_id', user.id);
+  const { count: c } = await q;
+  count = c || 0;
+}
+---
+
+{count > 0 && <span class="nav-badge" aria-label={`${count} unread`}>{count > 99 ? '99+' : count}</span>}
+
+<style>
+  .nav-badge {
+    margin-left: auto; background: var(--ntv-orange); color: #fff;
+    font-size: 10px; font-weight: 700; line-height: 1; border-radius: 999px; padding: 3px 7px;
+  }
+</style>

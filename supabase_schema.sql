@@ -194,8 +194,29 @@ CREATE TABLE IF NOT EXISTS public.shift_config (
 );
 
 -- ==========================================
+-- FEEDBACK MESSAGES
+-- ==========================================
+
+-- 13. MESSAGES
+-- Purpose: One conversation per user with the app admin (see isAdmin in src/lib/auth.ts).
+-- thread_user_id is the non-admin side of the conversation; from_admin says who wrote the row.
+-- user_name/email/picture snapshot the user on the messages they send, for the admin's inbox.
+CREATE TABLE IF NOT EXISTS public.messages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    thread_user_id TEXT NOT NULL,
+    from_admin BOOLEAN NOT NULL DEFAULT FALSE,
+    body TEXT NOT NULL CHECK (length(body) BETWEEN 1 AND 2000),
+    user_name TEXT,
+    user_email TEXT,
+    user_picture TEXT,
+    read_at TIMESTAMP WITH TIME ZONE, -- set when the other side opens the conversation
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- ==========================================
 -- INDEXES
 -- ==========================================
+CREATE INDEX IF NOT EXISTS idx_messages_thread ON public.messages(thread_user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_student_coordinator ON public.student_settings(coordinator_id);
 CREATE INDEX IF NOT EXISTS idx_student_section ON public.student_settings(section_id);
 CREATE INDEX IF NOT EXISTS idx_sections_coordinator ON public.coordinator_sections(coordinator_id);
@@ -226,6 +247,7 @@ ALTER TABLE public.attendance_overrides ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.attendance_config ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.attendance_holidays ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.shift_config ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
 
 -- ==========================================
 -- MIGRATING AN EXISTING DATABASE

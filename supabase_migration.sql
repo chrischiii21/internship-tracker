@@ -48,6 +48,26 @@ ALTER TABLE public.salary_history ENABLE ROW LEVEL SECURITY;
 
 
 -- --------------------------------------------------------------------------
+-- 1d. messages  (REQUIRED for the Feedback / Inbox page)
+-- --------------------------------------------------------------------------
+-- One conversation per user with the app admin. Until this runs, /messages shows an error.
+
+CREATE TABLE IF NOT EXISTS public.messages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    thread_user_id TEXT NOT NULL,
+    from_admin BOOLEAN NOT NULL DEFAULT FALSE,
+    body TEXT NOT NULL CHECK (length(body) BETWEEN 1 AND 2000),
+    user_name TEXT,
+    user_email TEXT,
+    user_picture TEXT,
+    read_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_messages_thread ON public.messages(thread_user_id, created_at);
+ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
+
+
+-- --------------------------------------------------------------------------
 -- 2. Indexes for the queries the app actually runs
 -- --------------------------------------------------------------------------
 -- Hours are always read as "this user, this mode, since this date"; the coordinator roster reads

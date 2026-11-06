@@ -11,6 +11,11 @@ import { supabase } from './supabase';
 
 // ... SCOPES and other functions remain same ...
 
+// The app owner. Keeps every normal feature, plus the Messages inbox where users' feedback lands.
+// The email comes from Google's verified userinfo at sign-in, so it can't be spoofed by a user.
+export const ADMIN_EMAIL ='christymontejo2003@gmail.com';
+export const isAdmin = (user: any) => user?.email?.toLowerCase() === ADMIN_EMAIL;
+
 export async function getOAuth2Client(origin?: string) {
   const google = await loadGoogle();
   // Use the origin from the request if available, otherwise fallback to the environment variable
@@ -110,6 +115,7 @@ export async function deleteAccount(userId: string) {
   await supabase.from('payout_adjustments').delete().eq('user_id', userId);
   await supabase.from('salary_history').delete().eq('user_id', userId);
   await supabase.from('sync_logs').delete().eq('user_id', userId);
+  await supabase.from('messages').delete().eq('thread_user_id', userId);
 
   // A coordinator's sections go too; their students' coordinator_id/section_id are cleared by the
   // ON DELETE SET NULL references on those columns.

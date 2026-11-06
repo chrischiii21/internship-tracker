@@ -1,0 +1,161 @@
+---
+// "What's new" announcement for the Feedback page, rendered from Sidebar.astro on signed-in pages.
+// Two layers, both remembered per device (localStorage) like the onboarding tour:
+//   1. A one-time popup — bottom sheet on phones, centred dialog on desktop.
+//   2. A "NEW" tag on the Feedback tab and a dot on the mobile ☰ button, which stay until the
+//      person actually opens Feedback — so closing the popup doesn't lose them the way in.
+// To announce something else later, bump the keys and change the copy.
+const { onMessagesPage = false } = Astro.props;
+---
+
+<dialog id="feature-announce" class="announce" aria-labelledby="announce-title" data-on-messages={onMessagesPage ? '1' : ''}>
+  <form method="dialog">
+    <button class="announce-close" aria-label="Close">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+    </button>
+  </form>
+
+  <div class="announce-icon" aria-hidden="true">
+    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 9h8M8 13h5"/></svg>
+  </div>
+  <span class="announce-pill">New feature</span>
+  <h2 id="announce-title">Talk to us directly with Feedback</h2>
+  <p class="announce-lead">InternFlow is built around what you need. Now you can message the InternFlow team straight from the app:</p>
+
+  <ul class="announce-list">
+    <li><span aria-hidden="true">💡</span><div><strong>Suggest a feature</strong> you wish the app had</div></li>
+    <li><span aria-hidden="true">🐞</span><div><strong>Report a bug</strong> or anything that looks wrong or confusing</div></li>
+    <li><span aria-hidden="true">❓</span><div><strong>Ask a question</strong> about your hours, DTR, attendance or allowance</div></li>
+  </ul>
+
+  <p class="announce-note">We read every message and reply right inside the app. Only you and the InternFlow team can see your conversation.</p>
+
+  <p class="announce-where">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+    <span class="only-mobile">Find it anytime: tap the <strong>☰ menu</strong> at the top left, then <strong>Feedback</strong>.</span>
+    <span class="only-desktop">Find it anytime under <strong>Feedback</strong> in the sidebar.</span>
+  </p>
+
+  <div class="announce-actions">
+    <a href="/messages" class="announce-btn primary" data-go>Send feedback now</a>
+    <form method="dialog"><button class="announce-btn ghost">Maybe later</button></form>
+  </div>
+</dialog>
+
+<style>
+  .announce {
+    width: 440px; max-width: calc(100% - 32px); max-height: calc(100% - 32px); overflow-y: auto;
+    margin: auto; padding: 24px; border-radius: 18px;
+    background: var(--modal-bg); color: var(--text-primary);
+    border: 1px solid rgba(237, 102, 33, 0.3); box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  }
+  .announce[open] { animation: announce-pop .4s cubic-bezier(.16,1,.3,1) both; }
+  .announce::backdrop { background: rgba(0, 0, 0, 0.55); backdrop-filter: blur(3px); }
+  @keyframes announce-pop { from { opacity: 0; transform: translateY(12px) scale(.98); } to { opacity: 1; transform: none; } }
+
+  .announce-close {
+    position: absolute; top: 14px; right: 14px; background: none; border: none; padding: 6px;
+    color: var(--text-secondary); cursor: pointer; border-radius: 8px;
+  }
+  .announce-close:hover { background: rgba(127, 127, 127, 0.12); color: var(--text-primary); }
+
+  .announce-icon {
+    width: 48px; height: 48px; border-radius: 14px; display: grid; place-items: center;
+    background: rgba(237, 102, 33, 0.12); color: var(--ntv-orange); margin-bottom: 14px;
+  }
+  .announce-pill {
+    display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--ntv-orange); background: rgba(237, 102, 33, 0.12); border: 1px solid rgba(237, 102, 33, 0.3);
+    border-radius: 999px; padding: 3px 9px; margin-bottom: 8px;
+  }
+  .announce h2 { font-size: 20px; font-weight: 700; line-height: 1.25; margin-bottom: 8px; padding-right: 24px; }
+  .announce-lead { font-size: 14px; line-height: 1.55; color: var(--text-secondary); margin-bottom: 14px; }
+
+  .announce-list { list-style: none; padding: 0; margin: 0 0 14px; display: grid; gap: 8px; }
+  .announce-list li {
+    display: flex; gap: 12px; align-items: flex-start; font-size: 14px; line-height: 1.45;
+    color: var(--text-secondary); background: rgba(127, 127, 127, 0.07);
+    border: 1px solid rgba(127, 127, 127, 0.12); border-radius: 10px; padding: 10px 12px;
+  }
+  .announce-list li > span { font-size: 18px; line-height: 1.2; }
+  .announce-list strong, .announce-where strong { color: var(--text-primary); }
+
+  .announce-note { font-size: 13px; line-height: 1.55; color: var(--text-secondary); margin-bottom: 12px; }
+  .announce-where {
+    display: flex; gap: 8px; align-items: flex-start; font-size: 13px; line-height: 1.5;
+    color: var(--text-secondary); margin-bottom: 18px;
+  }
+  .announce-where svg { flex-shrink: 0; margin-top: 3px; color: var(--ntv-orange); }
+
+  .announce-actions { display: flex; flex-direction: column; gap: 8px; }
+  .announce-actions form { display: contents; }
+  .announce-btn {
+    display: block; width: 100%; text-align: center; font: inherit; font-size: 14px; font-weight: 600;
+    border-radius: 10px; padding: 12px 16px; cursor: pointer; text-decoration: none; border: none;
+  }
+  .announce-btn.primary { background: var(--ntv-gradient); color: #fff; }
+  .announce-btn.primary:hover { filter: brightness(1.15); }
+  .announce-btn.ghost { background: none; color: var(--text-secondary); }
+  .announce-btn.ghost:hover { color: var(--text-primary); }
+
+  .only-mobile { display: none; }
+
+  /* Phones: a bottom sheet, easy to reach with a thumb, clear of the iPhone home bar. */
+  @media (max-width: 900px) {
+    .only-mobile { display: inline; }
+    .only-desktop { display: none; }
+  }
+  @media (max-width: 600px) {
+    .announce {
+      width: 100%; max-width: 100%; max-height: 88dvh; margin: auto 0 0;
+      border-radius: 20px 20px 0 0; border-bottom: none;
+      padding: 22px 18px calc(18px + env(safe-area-inset-bottom));
+    }
+    .announce[open] { animation-name: announce-sheet; }
+    @keyframes announce-sheet { from { transform: translateY(100%); } to { transform: none; } }
+  }
+  @media (prefers-reduced-motion: reduce) { .announce[open] { animation: none; } }
+
+  /* Lasting hints, set by the script below on elements owned by Sidebar and Header. */
+  :global(.nav-item.has-new-feature)::after {
+    content: 'NEW'; margin-left: auto; font-size: 9px; font-weight: 800; letter-spacing: .08em;
+    color: #fff; background: var(--ntv-gradient); border-radius: 999px; padding: 3px 7px;
+  }
+  :global(#mobile-menu-toggle.has-new-feature) { position: relative; }
+  :global(#mobile-menu-toggle.has-new-feature)::after {
+    content: ''; position: absolute; top: 2px; right: 2px; width: 9px; height: 9px; border-radius: 50%;
+    background: var(--ntv-orange); box-shadow: 0 0 0 2px var(--modal-bg);
+  }
+</style>
+
+<script is:inline>
+  (() => {
+    const POPUP_KEY = 'internflow-announce-feedback-v1';
+    const VISITED_KEY = 'internflow-visited-feedback-v1';
+    const dlg = document.getElementById('feature-announce');
+    if (!dlg) return;
+    const get = (k) => { try { return localStorage.getItem(k) === '1'; } catch { return true; } };
+    const set = (k) => { try { localStorage.setItem(k, '1'); } catch {} };
+
+    // Opening the Feedback page means they've found it: no popup, no hints, ever again.
+    if (dlg.dataset.onMessages) { set(POPUP_KEY); set(VISITED_KEY); return; }
+
+    if (!get(VISITED_KEY)) {
+      document.querySelector('[data-tour="nav-messages"]')?.classList.add('has-new-feature');
+      document.getElementById('mobile-menu-toggle')?.classList.add('has-new-feature');
+    }
+    if (get(POPUP_KEY)) return;
+
+    // Any way out of the popup (buttons, ✕, Esc) counts as seen; the hints above remain.
+    dlg.addEventListener('close', () => set(POPUP_KEY));
+    dlg.querySelector('[data-go]')?.addEventListener('click', () => set(POPUP_KEY));
+
+    // Let the page settle first, and never open over the onboarding tour — if it's running,
+    // the popup waits for a later page.
+    setTimeout(() => {
+      const tour = document.getElementById('tour-root');
+      if (tour && !tour.hidden) return;
+      if (typeof dlg.showModal === 'function') dlg.showModal();
+    }, 1200);
+  })();
+</script>

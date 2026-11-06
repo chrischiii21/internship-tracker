@@ -1,4 +1,7 @@
 ---
+import { isAdmin } from '../lib/auth';
+import UnreadBadge from './UnreadBadge.astro';
+import FeatureAnnouncement from './FeatureAnnouncement.astro';
 const { user, activeTab, isLocked = false, role = 'student' } = Astro.props;
 
 const allNavItems = [
@@ -37,8 +40,15 @@ const allNavItems = [
     icon: `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
     roles: ['coordinator']
   },
-  { 
-    id: 'settings', 
+  {
+    id: 'messages',
+    label: isAdmin(user) ? 'Inbox' : 'Feedback',
+    href: '/messages',
+    icon: `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`,
+    roles: ['student', 'coordinator']
+  },
+  {
+    id: 'settings',
     label: 'Settings', 
     href: '/settings', 
     icon: `<svg width="17" height="17" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.7"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" stroke="currentColor" stroke-width="1.7"/></svg>`,
@@ -86,6 +96,7 @@ const navItems = allNavItems.filter(item => item.roles?.includes(role || 'studen
         >
           <Fragment set:html={item.icon} />
           <span>{item.label}</span>
+          {item.id === 'messages' && !isLocked && user && <UnreadBadge server:defer />}
         </NavTag>
       );
     })}
@@ -95,6 +106,8 @@ const navItems = allNavItems.filter(item => item.roles?.includes(role || 'studen
     <div class="sidebar-version">v1.0.4-stable</div>
   </div>
 </aside>
+
+{!isLocked && user && !isAdmin(user) && <FeatureAnnouncement onMessagesPage={activeTab === 'messages'} />}
 
 <style>
   #sidebar {
@@ -200,7 +213,7 @@ const navItems = allNavItems.filter(item => item.roles?.includes(role || 'studen
     document.body.classList.remove('sidebar-open');
     main.classList.add('tab-switching');
     window.scrollTo(0, 0);
-    hideLoader = window.showSectionLoading?.(main, `Loading ${link.textContent.trim()}`);
+    hideLoader = window.showSectionLoading?.(main, `Loading ${link.querySelector("span").textContent.trim()}`);
   });
 
   // Back/forward can restore this page from memory with a loader still up — put it back as it was.
