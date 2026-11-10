@@ -28,3 +28,7 @@ pnpm-debug.log*
 Thumbs.db
 # brag launch-video workspace (renders, frames, audio stems)
 brag-output/
+
+# Security audit
+security-reports/
+.bla-manifest.json
